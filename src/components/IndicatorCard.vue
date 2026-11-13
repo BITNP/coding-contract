@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { Check, Ban } from 'lucide-vue-next'
 import keyIcon from '../assets/material-symbols/key.svg?inline'
-import lockIcon from '../assets/game-ui/lock.png?inline'
+import lockIcon from '../assets/game-ui/lock.webp?inline'
 import { indicatorStates, toggle } from '../state.js'
 import IndicatorPopover from './IndicatorPopover.vue'
 import Halftone from './Halftone.vue'
@@ -14,7 +14,7 @@ const iconMask = icon => ({ maskImage: `url("${icon}")` })
 <template>
   <IndicatorPopover v-if="item" :item="item">
       <button class="indicator" :class="{ selected: state.selected, conflict: state.conflict, locked: state.locked, 'key-card': item.key }" :aria-label="`${item.name}，${item.level}级${state.selected ? '，已选中' : ''}`" :aria-pressed="state.selected" :aria-disabled="state.locked" @click="toggle(item)">
-        <span v-if="!item.locked && !item.key" class="reward-mark"><img src="/assets/first-clear.png" alt="" /></span>
+        <span v-if="!item.locked && !item.key" class="reward-mark"><img src="/assets/first-clear.webp" alt="" /></span>
         <span v-if="state.selected" class="selected-check"><Check :size="20" :stroke-width="4" /></span>
         <Halftone v-if="state.selected" class="card-halftone" color="#3d0006" :cell="4" :angle="135" :from="0.3" />
         <img :src="item.icon" alt="" draggable="false" class="indicator-icon" />

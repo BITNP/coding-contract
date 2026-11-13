@@ -1,4 +1,6 @@
-# 网协合约 · 开拓测试作战
+# Coding Contract: Net-Pioneer Experimental Operation
+
+网协合约 · 开拓测试作战
 
 ## 后端
 
@@ -29,6 +31,8 @@ VITE_API_BASE_URL=https://api.example.com/api pnpm build
 ```
 
 把 `dist/` 上传到静态服务器，配置路由回退到 `index.html`。API 地址需替换为实际地址；如用同源反代 `/api`，构建时省略 `VITE_API_BASE_URL`。
+
+静态服务器启用 JS、CSS、SVG 的 Brotli 或 gzip 压缩，并正确返回 WebP 与 WOFF2 的 MIME 类型。当前产物使用固定文件名，使用 ETag 或 Last-Modified 协商缓存，避免设置长期 `immutable` 缓存导致更新后仍加载旧文件。
 
 ## 更新与排错
 

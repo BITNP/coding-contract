@@ -120,7 +120,7 @@ async function start() {
         <img class="industry-watermark" src="/assets/endfield.svg" alt="" />
         <span class="section-marker" />
         <div>
-          <h1>选择指标<img class="cc-mark" src="/assets/cc-mark.png" alt="" /></h1>
+          <h1>选择指标<img class="cc-mark" src="/assets/cc-mark.webp" alt="" /></h1>
           <div class="title-decoration">▲ ▲ ▲ ▲<span /></div>
         </div>
       </div>
@@ -152,7 +152,7 @@ async function start() {
         <TransitionGroup v-scroll-fade name="selected-list" tag="div" class="selected-list">
           <article v-for="item in list" :key="item.id" class="selected-item">
             <div class="selected-symbol">
-              <span class="level-badge" :data-level="item.level">{{ item.level }}<img src="/assets/risk-level.png" alt="" /></span>
+              <span class="level-badge" :data-level="item.level">{{ item.level }}<img src="/assets/risk-level.webp" alt="" /></span>
               <img :src="item.icon" alt="" class="selected-icon" />
             </div>
             <div class="selected-copy">
@@ -179,7 +179,7 @@ async function start() {
     <footer class="operation-footer">
       <Halftone class="footer-halftone" color="#0402034d" :cell="5" :size="1.05" :origin="[0.8, 1]" :radius="0.45" :gamma="1.6" />
       <div class="record-block">
-        <img src="/assets/risk-level.png" alt="" />
+        <img src="/assets/risk-level.webp" alt="" />
         <div><strong>{{ pad(best) }}</strong><span>最高纪录</span></div>
       </div>
       <span class="footer-divider" />
@@ -197,12 +197,12 @@ async function start() {
           <motion.strong :key="score" :initial="{ opacity: 0.5, y: 8 }" :animate="{ opacity: 1, y: 0 }" :transition="{ duration: 0.18 }">
             {{ pad(score) }}
           </motion.strong>
-          <img src="/assets/risk-level.png" alt="指标总计" />
+          <img src="/assets/risk-level.webp" alt="指标总计" />
         </div>
         <button class="start-button" :class="{ starting }" :disabled="starting" :aria-busy="starting" @click="start">
           <Halftone class="start-halftone" color="#640016" :cell="5" :angle="270" :from="0.35" />
           <span class="start-track" aria-hidden="true" />
-          <img class="contract-emblem" src="/assets/contract-emblem.png" alt="" />
+          <img class="contract-emblem" src="/assets/contract-emblem.webp" alt="" />
           <span class="start-copy">
             <strong class="start-title">行动开始</strong>
             <span class="start-meta">

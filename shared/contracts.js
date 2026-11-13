@@ -186,7 +186,7 @@ export const indicators = groups.flatMap((group) =>
     group: group.id,
     name: `${group.name} ${['I', 'II', 'III'][variant.level - 1]}`,
     column: group.column,
-    icon: `/assets/icon_activity_contract_tag_${group.icon}.png`,
+    icon: `/assets/icon_activity_contract_tag_${group.icon}.webp`,
     points: variant.level,
     languages:
       variant.languages ||

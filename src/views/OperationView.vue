@@ -365,7 +365,7 @@ onBeforeUnmount(() => {
 
       <aside v-if="checks.length" class="effect-rail" aria-label="作战指标">
         <div class="effects-score">
-          <img src="/assets/risk-level.png" alt="" />
+          <img src="/assets/risk-level.webp" alt="" />
           <span>指标总计</span>
           <strong class="num">{{ String(operation.question.score).padStart(2, '0') }}</strong>
         </div>
@@ -381,7 +381,7 @@ onBeforeUnmount(() => {
               <div class="effect-copy">
                 <b>{{ item.name }}</b>
                 <span class="level-badge" :data-level="item.level"
-                  >{{ item.level }}<img src="/assets/risk-level.png" alt=""
+                  >{{ item.level }}<img src="/assets/risk-level.webp" alt=""
                 /></span>
               </div>
               <component

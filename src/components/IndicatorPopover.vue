@@ -10,7 +10,7 @@ defineProps({ item: Object, placement: { type: String, default: 'right' } })
     <div class="indicator-popover">
       <div class="popover-heading"><img :src="item.icon" alt="" /><strong>{{ item.name }}</strong></div>
       <div class="popover-content">
-        <span class="level-badge" :data-level="item.level">{{ item.level }}<img src="/assets/risk-level.png" alt="指标" /></span>
+        <span class="level-badge" :data-level="item.level">{{ item.level }}<img src="/assets/risk-level.webp" alt="指标" /></span>
         <p><EffectText :text="item.description" /></p>
         <slot name="hint" />
       </div>

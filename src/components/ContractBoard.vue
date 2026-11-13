@@ -66,7 +66,7 @@ onBeforeUnmount(() => observer.disconnect())
         <div v-for="level in 3" :key="level" class="tier" :data-level="level">
           <Halftone v-if="level === 3" class="tier-halftone" color="#fff" :cell="5" :angle="200" :from="0.25" />
           <span class="tier-deco" aria-hidden="true"><svg v-for="n in level" :key="n" viewBox="0 0 14 14"><path d="M1.5 1.5h11l-11 11z" /></svg></span><span class="tier-number">{{ level }}</span>
-          <img src="/assets/risk-level.png" alt="级指标" />
+          <img src="/assets/risk-level.webp" alt="级指标" />
         </div>
       </div>
       <div ref="board" v-scroll-fade:x="32" class="indicator-scroll" @wheel="wheel" @scroll="updateProgress">
