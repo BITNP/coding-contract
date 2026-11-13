@@ -15,7 +15,7 @@ const post = (path, body) => request(path, { method: 'POST', body: JSON.stringif
 
 export const api = {
   session: () => request('/session'),
-  login: (credentials) => post('/auth/login', credentials),
+  login: (returnTo = '/') => window.location.assign(`${base}/auth/login?${new URLSearchParams({ returnTo })}`),
   logout: () => post('/auth/logout'),
   record: () => request('/records/best'),
   start: (ids, language) => post('/operations', { indicators: ids, language }),

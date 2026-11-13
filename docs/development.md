@@ -33,16 +33,19 @@ pnpm --dir server --ignore-workspace dev
 
 C/C++ 使用 Clang、Python 使用 AST 检查语法指标；其他语言只开放通用指标。支持范围统一维护在 `shared/languages.js`。新增语言时同步更新代码模板、运行命令和工具链，并运行全语言测试。
 
-后端只提供 API。提交记录和最高分写入 SQLite，会话保存在内存中，重启后需重新登录。`AUTH_API_URL` 留空时使用访客模式；接入账号服务的约定见 [auth.js](../server/auth.js)。
+后端只提供 API。提交记录和最高分写入 SQLite，会话保存在内存中，重启后需重新登录。统一认证使用 OIDC 授权码 + PKCE，配置见 [README](../README.md#网协统一认证)。本地未配置任何 OIDC 参数时保留访客模式，访客共用记录；生产配置完整 OIDC 参数后，记录和作战 API 都要求登录。
 
 ## 验证
 
 ```sh
+pnpm --dir server --ignore-workspace install --frozen-lockfile
 pnpm test                    # 本地规则
 pnpm test:judge              # 真实沙箱与全部语言
 DEPLOYMENT_URL=http://127.0.0.1:3001 pnpm test # API、跨域、提交与记录
 pnpm build
 ```
+
+`server/tests/auth.test.js` 使用本地模拟认证服务和真实 RSA 签名令牌，验证 PKCE、state/nonce、签名、issuer/audience、回调重放、过期、退出，以及实际 API 的登录限制；不需要真实账号或客户端密钥。真实沙箱测试仍需安装 go-judge 和全部语言工具链。
 
 ## 素材署名
 

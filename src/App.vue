@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NConfigProvider, NMessageProvider, NModal, NInput, NForm, NFormItem, darkTheme } from 'naive-ui'
+import { NConfigProvider, NMessageProvider, NModal, darkTheme } from 'naive-ui'
 import { ArrowLeft, Maximize, Minimize, CircleHelp, UserRound, ArrowUpRight, LogOut } from 'lucide-vue-next'
 import { themeOverrides } from './theme'
 import { refreshSession, user, authAvailable, connection } from './state'
@@ -14,10 +14,7 @@ const router = useRouter()
 const inOperation = computed(() => route.path.startsWith('/operation/'))
 const loginOpen = ref(false)
 const helpOpen = ref(false)
-const username = ref('')
-const password = ref('')
 const loginError = ref('')
-const loading = ref(false)
 const fullscreen = ref(false)
 const helpSteps = [
   {
@@ -38,24 +35,19 @@ function syncFullscreen() {
 }
 onMounted(() => {
   refreshSession()
+  if (route.query.auth_error) {
+    loginError.value = String(route.query.auth_error)
+    loginOpen.value = true
+    const { auth_error, ...query } = route.query
+    router.replace({ path: route.path, query, hash: route.hash })
+  }
   syncFullscreen()
   document.addEventListener('fullscreenchange', syncFullscreen)
 })
 onBeforeUnmount(() => document.removeEventListener('fullscreenchange', syncFullscreen))
 
-async function signIn() {
-  loading.value = true
-  loginError.value = ''
-  try {
-    await api.login({ username: username.value, password: password.value })
-    await refreshSession()
-    password.value = ''
-    loginOpen.value = false
-  } catch (error) {
-    loginError.value = error.message
-  } finally {
-    loading.value = false
-  }
+function signIn() {
+  api.login(route.fullPath)
 }
 async function signOut() {
   await api.logout()
@@ -110,7 +102,7 @@ async function toggleFullscreen() {
         v-model:show="loginOpen"
         preset="card"
         class="game-modal"
-        title="管理员登录"
+        title="网协统一登录"
         :bordered="false"
         style="width: 420px"
       >
@@ -120,32 +112,17 @@ async function toggleFullscreen() {
           <UiButton kind="dark" @click="signOut"><LogOut :size="16" />退出登录</UiButton></template
         >
         <template v-else>
-          <NForm @submit.prevent="signIn">
-            <NFormItem label="账号"
-              ><NInput
-                v-model:value="username"
-                placeholder="输入账号"
-                autocomplete="username"
-                :disabled="!authAvailable"
-            /></NFormItem>
-            <NFormItem label="密码"
-              ><NInput
-                v-model:value="password"
-                type="password"
-                show-password-on="click"
-                placeholder="输入密码"
-                autocomplete="current-password"
-                :disabled="!authAvailable"
-            /></NFormItem>
+          <div>
+            <p v-if="authAvailable">使用网协统一账号登录并保存个人作战记录。</p>
             <p v-if="loginError" class="error-text">{{ loginError }}</p>
             <p v-if="!authAvailable" class="muted">账号服务暂未开放，可先以访客身份参与作战。</p>
-            <UiButton v-if="authAvailable" kind="primary" block attr-type="submit" :loading="loading"
+            <UiButton v-if="authAvailable" kind="primary" block @click="signIn"
               >登录并继续<ArrowUpRight :size="18"
             /></UiButton>
             <UiButton v-else kind="primary" block @click="loginOpen = false"
               >访客体验<ArrowUpRight :size="18"
             /></UiButton>
-          </NForm>
+          </div>
         </template>
       </NModal>
       <NModal
