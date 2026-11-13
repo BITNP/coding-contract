@@ -1,0 +1,38 @@
+{
+  "name": "pioneer-contract",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "node --test tests/*.test.js",
+    "test:judge": "JUDGE_INTEGRATION=1 node --test tests/*.test.js",
+    "judge:install": "node dev/install-judge.js",
+    "judge:start": "limactl start --tty=false pioneer-judge",
+    "judge:stop": "limactl stop pioneer-judge"
+  },
+  "dependencies": {
+    "@algoproclub/clangd-wasm": "^0.1.1",
+    "@lezer/cpp": "^1.1.6",
+    "@lezer/python": "^1.1.19",
+    "@mdit/plugin-katex": "^1.2.0",
+    "browser-basedpyright": "^1.40.2",
+    "katex": "^0.19.1",
+    "lucide-vue-next": "^0.468.0",
+    "markdown-it": "^15.0.3",
+    "monaco-editor": "^0.57.0",
+    "motion-v": "^1.7.0",
+    "naive-ui": "^2.43.0",
+    "vue": "^3.5.0",
+    "vue-router": "^4.6.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.0",
+    "vite": "^7.2.0"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "packageManager": "pnpm@10.34.9"
+}

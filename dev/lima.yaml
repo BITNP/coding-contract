@@ -1,0 +1,14 @@
+images:
+  - location: https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-arm64.qcow2
+    arch: aarch64
+vmType: vz
+cpus: 4
+memory: 4GiB
+disk: 20GiB
+mounts: []
+containerd:
+  system: false
+  user: false
+portForwards:
+  - guestPort: 5050
+    hostPort: 5050
