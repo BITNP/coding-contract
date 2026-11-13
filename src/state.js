@@ -75,10 +75,10 @@ export function toggle(item) {
 
 export async function refreshSession() {
   try {
-    const [session, record] = await Promise.all([api.session(), api.record()])
+    const session = await api.session()
     user.value = session.user
     authAvailable.value = session.authAvailable
-    best.value = record.score
+    best.value = session.authAvailable && !session.user ? 0 : (await api.record()).score
     connection.value = 'online'
   } catch {
     connection.value = 'offline'

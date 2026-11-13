@@ -1,0 +1,18 @@
+{
+  "clientId": "coding-contract",
+  "name": "网协合约",
+  "enabled": true,
+  "protocol": "openid-connect",
+  "publicClient": false,
+  "clientAuthenticatorType": "client-secret",
+  "standardFlowEnabled": true,
+  "implicitFlowEnabled": false,
+  "directAccessGrantsEnabled": false,
+  "serviceAccountsEnabled": false,
+  "rootUrl": "https://oj.bitnp.net",
+  "baseUrl": "/",
+  "redirectUris": ["https://oj.bitnp.net/api/auth/callback"],
+  "webOrigins": ["https://oj.bitnp.net"],
+  "defaultClientScopes": ["web-origins", "profile", "email"],
+  "attributes": {"pkce.code.challenge.method": "S256"}
+}

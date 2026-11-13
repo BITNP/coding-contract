@@ -9,7 +9,7 @@ const status = lspStatus
 const labels = {
   loading: () => `代码提示下载中 ${Math.round(status.value.progress * 100)}%`,
   ready: () => '代码提示已就绪',
-  error: () => '代码提示下载失败，点击重试',
+  error: () => `代码提示加载失败，点击重试${status.value.message ? `：${status.value.message}` : ''}`,
   unsupported: () => '当前浏览器不支持该语言的代码提示',
 }
 const label = computed(() => labels[status.value.state]?.())

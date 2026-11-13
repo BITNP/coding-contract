@@ -8,9 +8,28 @@ export function registerAssetCache() {
   if (!navigator.serviceWorker) return Promise.resolve()
   return navigator.serviceWorker
     .register(`/sw.js?v=${encodeURIComponent(__LSP_VERSION__)}`)
-    .then(() =>
-      Promise.race([navigator.serviceWorker.ready, new Promise((resolve) => setTimeout(resolve, 3000))]),
-    )
+    .then(async (registration) => {
+      const worker = registration.installing || registration.waiting
+      let timer
+      let stopWaiting = () => {}
+      const activated = new Promise((resolve) => {
+        if (!worker || worker.state === 'activated' || worker.state === 'redundant') return resolve()
+        const onStateChange = () => {
+          if (worker.state === 'activated' || worker.state === 'redundant') resolve()
+        }
+        worker.addEventListener('statechange', onStateChange)
+        stopWaiting = () => worker.removeEventListener('statechange', onStateChange)
+      })
+      try {
+        await Promise.race([
+          activated.then(() => navigator.serviceWorker.ready),
+          new Promise((resolve) => { timer = setTimeout(resolve, 3000) }),
+        ])
+      } finally {
+        clearTimeout(timer)
+        stopWaiting()
+      }
+    })
     .catch(() => {})
 }
 
@@ -27,7 +46,7 @@ async function download(asset, cache, report, signal) {
   const resume =
     part.loaded && part.validator ? { range: `bytes=${part.loaded}-`, 'if-range': part.validator } : {}
   const response = await fetch(asset.url, { signal, cache: 'no-cache', headers: resume })
-  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  if (!response.ok) throw new Error(`${new URL(asset.url).pathname}: HTTP ${response.status}`)
   if (response.status !== 206) Object.assign(part, { chunks: [], loaded: 0 })
   part.validator = validator(response)
   const length = !response.headers.get('content-encoding') && Number(response.headers.get('content-length'))

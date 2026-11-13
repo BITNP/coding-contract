@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { login } from './auth.js'
+import { authConfig, createAuth } from './auth.js'
 import { question } from './question.js'
 import { evaluate } from './judge.js'
 import { contractById, selectionErrors } from '../shared/contracts.js'
@@ -20,7 +20,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS operations (id TEXT PRIMARY KEY, user_id TEXT, data TEXT)
 `)
 
-const sessions = new Map()
+const auth = createAuth(authConfig())
 const app = express()
 const origins = new Set(
   (process.env.CORS_ORIGINS ?? 'http://127.0.0.1:5173,http://localhost:5173')
@@ -45,41 +45,20 @@ app.use((req, res, next) => {
 
 app.use(express.json())
 
-app.use((req, res, next) => {
-  const sid = /(?:^|; )pioneer_session=([^;]+)/.exec(req.headers.cookie || '')?.[1]
-  req.user = sessions.get(sid)?.user || null
-  req.sid = sid
+app.use(auth.authenticate)
+app.use('/api', (_req, res, next) => {
+  res.set('Cache-Control', 'no-store')
   next()
 })
+app.use('/api/auth', auth.router)
+app.use('/api/operations', auth.requireUser)
+app.use('/api/records', auth.requireUser)
 
 const owner = (req) => req.user?.id || 'preview'
-const cookieOptions = (req) => ({
-  httpOnly: true,
-  sameSite: process.env.COOKIE_SAME_SITE || 'lax',
-  secure: process.env.COOKIE_SAME_SITE === 'none' || req.secure,
-})
 
 app.get('/api/session', (req, res) =>
-  res.json({ user: req.user, authAvailable: Boolean(process.env.AUTH_API_URL) }),
+  res.json({ user: req.user, authAvailable: auth.available }),
 )
-
-app.post('/api/auth/login', async (req, res) => {
-  const result = await login(req.body)
-  if (!result) return res.status(503).json({ message: '账号服务即将开放，当前可使用访客体验。' })
-
-  const sid = randomUUID()
-  sessions.set(sid, result)
-  res.cookie('pioneer_session', sid, {
-    ...cookieOptions(req),
-    maxAge: 86400000,
-  })
-  res.json({ user: result.user })
-})
-
-app.post('/api/auth/logout', (req, res) => {
-  sessions.delete(req.sid)
-  res.clearCookie('pioneer_session', cookieOptions(req)).json({ ok: true })
-})
 
 app.get('/api/records/best', (req, res) => {
   res.json(
@@ -96,7 +75,6 @@ const operationResponse = (operation) => ({
 })
 
 app.post('/api/operations', async (req, res) => {
-  if (process.env.AUTH_API_URL && !req.user) return res.status(401).json({ message: '请先登录后开始作战' })
   const { indicators, language = 'cpp' } = req.body
   const errors = selectionErrors(indicators, language)
   if (errors.length) return res.status(400).json({ message: errors.join('；') })
@@ -167,6 +145,6 @@ app.use((error, req, res, _next) =>
   res.status(error.status || 500).json({ message: error.message || '服务暂时不可用' }),
 )
 
-app.listen(process.env.PORT || 3001, process.env.HOST || '127.0.0.1', () =>
-  console.log(`API: http://${process.env.HOST || '127.0.0.1'}:${process.env.PORT || 3001}`),
+const server = app.listen(process.env.PORT || 3001, process.env.HOST || '127.0.0.1', () =>
+  console.log(`API: http://${process.env.HOST || '127.0.0.1'}:${server.address().port}`),
 )

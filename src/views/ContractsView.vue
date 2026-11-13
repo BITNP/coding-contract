@@ -19,7 +19,7 @@ import {
   Code2,
   LockOpen,
 } from 'lucide-vue-next'
-import { selected, selectedIds, selectedLanguage, setLanguage, score, best, toggle, setSelection, keyActive } from '../state'
+import { selected, selectedIds, selectedLanguage, setLanguage, score, best, toggle, setSelection, keyActive, user, authAvailable } from '../state'
 import { languages } from '../../shared/languages.js'
 import { api } from '../api'
 import { sweep } from '../sweep'
@@ -101,6 +101,7 @@ function importCode() {
 
 const starting = ref(false)
 async function start() {
+  if (authAvailable.value && !user.value) return api.login('/')
   starting.value = true
   try {
     const operation = await api.start(selectedIds.value, selectedLanguage.value)

@@ -6,7 +6,8 @@ import vue from '@vitejs/plugin-vue'
 const monacoLsp = fileURLToPath(
   new URL('node_modules/monaco-editor/esm/external/monaco-lsp-client/out/index.js', import.meta.url),
 )
-const lspVersion = ['monaco-editor', '@algoproclub/clangd-wasm', 'browser-basedpyright']
+// Keep responses cached before the module MIME fix out of the current asset cache.
+const lspVersion = 'module-mime-v2_' + ['monaco-editor', '@algoproclub/clangd-wasm', 'browser-basedpyright']
   .map(
     (name) => JSON.parse(readFileSync(new URL(`node_modules/${name}/package.json`, import.meta.url))).version,
   )

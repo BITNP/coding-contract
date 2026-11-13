@@ -25,8 +25,9 @@ if [ -f "$state_dir/provision.sha256" ] && [ "$(cat "$state_dir/provision.sha256
   exit 0
 fi
 
-apt-get -o Acquire::Retries=3 update
-apt-get install -y --no-install-recommends \
+# 系统软件源直连；下载代理只用于下方的 GitHub 发布包。
+apt-get -o Acquire::http::Proxy=DIRECT -o Acquire::https::Proxy=DIRECT -o Acquire::Retries=3 update
+apt-get -o Acquire::http::Proxy=DIRECT -o Acquire::https::Proxy=DIRECT install -y --no-install-recommends \
   clang g++ python3-clang python3-pygments curl ca-certificates gnupg \
   default-jdk-headless nodejs node-typescript libnode-dev golang-go rustc \
   mono-mcs kotlin php-cli ruby lua5.4 perl r-base-core \
@@ -55,7 +56,12 @@ if [ ! -x "$swift_dir/usr/bin/swiftc" ]; then
   rm "$swift_archive"
 fi
 
-curl -fsSL --retry 3 "https://github.com/criyle/go-judge/releases/download/v1.14.0/go-judge_1.14.0_linux_${arch}" -o /usr/local/bin/go-judge.new
+go_judge_url="https://github.com/criyle/go-judge/releases/download/v1.14.0/go-judge_1.14.0_linux_${arch}"
+if [ -n "${GO_JUDGE_PROXY:-}" ]; then
+  curl --proxy "$GO_JUDGE_PROXY" -fsSL --retry 3 "$go_judge_url" -o /usr/local/bin/go-judge.new
+else
+  curl -fsSL --retry 3 "$go_judge_url" -o /usr/local/bin/go-judge.new
+fi
 chmod +x /usr/local/bin/go-judge.new
 mv /usr/local/bin/go-judge.new /usr/local/bin/go-judge
 # 运行时的发行版配置采用与库文件相同的只读挂载。

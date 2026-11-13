@@ -19,6 +19,26 @@ let version = 0
 const load = () => import(`data:text/javascript,${encodeURIComponent(source)}#${version++}`)
 const asset = { url: 'https://example.test/clangd.wasm' }
 
+test('cache setup waits for the new worker activation even when an older worker is ready', async (t) => {
+  const worker = new EventTarget()
+  worker.state = 'installing'
+  mockGlobal(t, 'navigator', {
+    serviceWorker: {
+      register: async () => ({ installing: worker }),
+      ready: Promise.resolve(),
+    },
+  })
+  const { registerAssetCache } = await load()
+  let done = false
+  const ready = registerAssetCache().then(() => { done = true })
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(done, false)
+  worker.state = 'activated'
+  worker.dispatchEvent(new Event('statechange'))
+  await ready
+  assert.equal(done, true)
+})
+
 test('cache write failure does not block startup or leave a completed range', async (t) => {
   const headers = []
   t.mock.method(globalThis, 'fetch', async (_url, options) => {
