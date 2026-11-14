@@ -33,8 +33,9 @@ const helpSteps = [
 function syncFullscreen() {
   fullscreen.value = Boolean(document.fullscreenElement)
 }
-onMounted(() => {
+onMounted(async () => {
   refreshSession()
+  await router.isReady()
   if (route.query.auth_error) {
     loginError.value = String(route.query.auth_error)
     loginOpen.value = true
