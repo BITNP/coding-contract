@@ -4,7 +4,7 @@
 
 ## 认证与后端
 
-在 Keycloak 注册独立客户端，可参考 [客户端模板](../deploy/keycloak-client.json)。按 [统一认证说明](../README.md#网协统一认证) 配置 `/etc/pioneer/api.env`，权限为 `600`，并设置 `HOST=127.0.0.1`。在第一次启动生产 API 前完成配置，不使用开发访客模式。
+先运行 `sudo install -d -m 755 /etc/pioneer`。在 Keycloak 注册独立客户端，可参考 [客户端模板](../deploy/keycloak-client.json)。按 [统一认证说明](../README.md#网协统一认证) 配置 `/etc/pioneer/api.env`，权限为 `600`，并设置 `HOST=127.0.0.1` 和 `DATA_DIR=/var/lib/pioneer`。在第一次启动生产 API 前完成配置，不使用开发访客模式。
 
 上传 `server/` 和 `shared/` 到同一目录，执行：
 

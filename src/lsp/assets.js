@@ -9,7 +9,7 @@ export function registerAssetCache() {
   return navigator.serviceWorker
     .register(`/sw.js?v=${encodeURIComponent(__LSP_VERSION__)}`)
     .then(async (registration) => {
-      const worker = registration.installing || registration.waiting
+      const worker = registration.installing || registration.waiting || registration.active
       let timer
       let stopWaiting = () => {}
       const activated = new Promise((resolve) => {
