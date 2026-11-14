@@ -1,6 +1,5 @@
 import { languages } from './languages.js'
 
-const MiB = 1024 * 1024
 const syntaxChecks = new Set(['names', 'syntax', 'operators'])
 
 // 同组只能选择一档。inherits 继承检查项，不要求同时选中，也不重复计分。
@@ -61,13 +60,13 @@ export const groups = [
     column: 5,
     requires: ['ancient-3'],
     variants: [
-      { level: 1, description: '运行内存上限 256 MiB', checks: [{ type: 'maxMemory', limit: 256 * MiB }] },
-      { level: 2, description: '运行内存上限 64 MiB', checks: [{ type: 'maxMemory', limit: 64 * MiB }] },
+      { level: 1, description: '运行内存上限 16 MB', checks: [{ type: 'maxMemory', limit: 16_000_000 }] },
+      { level: 2, description: '运行内存上限 4 MB', checks: [{ type: 'maxMemory', limit: 4_000_000 }] },
       {
         level: 3,
-        description: '运行内存上限 4 MiB',
+        description: '运行内存上限 325.325 kB',
         languages: languages.filter((language) => language.tinyMemory).map((language) => language.id),
-        checks: [{ type: 'maxMemory', limit: 4 * MiB }],
+        checks: [{ type: 'maxMemory', limit: 325_325 }],
       },
     ],
   },
@@ -124,7 +123,13 @@ export const groups = [
     icon: 107,
     column: 2,
     variants: [
-      { level: 2, description: '禁用字符 [ 和 ]', checks: [{ type: 'characters', forbidden: ['[', ']'] }] },
+      // 保留已创建作战和分享码中的 ID。
+      {
+        id: 'brackets-2',
+        level: 1,
+        description: '禁用字符 [ 和 ]',
+        checks: [{ type: 'characters', forbidden: ['[', ']'] }],
+      },
     ],
   },
   {
@@ -182,7 +187,7 @@ export const groups = [
 export const indicators = groups.flatMap((group) =>
   group.variants.map((variant) => ({
     ...variant,
-    id: `${group.id}-${variant.level}`,
+    id: variant.id || `${group.id}-${variant.level}`,
     group: group.id,
     name: `${group.name} ${['I', 'II', 'III'][variant.level - 1]}`,
     column: group.column,

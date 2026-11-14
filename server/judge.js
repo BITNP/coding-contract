@@ -115,15 +115,18 @@ export async function evaluate({ source, language, indicators, mode = 'submit' }
         copyIn: runFiles,
         cpuLimit: question.timeLimitMs * 1e6,
         clockLimit: question.timeLimitMs * 3e6,
-        memoryLimit: limit,
+        // 固定运行环境，合约预算在运行后判定，避免限额改变内核回收行为。
+        memoryLimit: question.memoryLimitBytes,
         files: [{ content: item.input }, { name: 'stdout', max: 4096 }, { name: 'stderr', max: 4096 }],
       })
       const verdict =
-        run.status === 'Accepted'
-          ? run.files.stdout.trim() === item.answer
-            ? 'AC'
-            : 'WA'
-          : statusCodes[run.status] || 'ERROR'
+        run.memory > limit
+          ? 'MLE'
+          : run.status === 'Accepted'
+            ? run.files.stdout.trim() === item.answer
+              ? 'AC'
+              : 'WA'
+            : statusCodes[run.status] || 'ERROR'
       result.timeMs = Math.max(result.timeMs, run.time / 1e6)
       result.memoryBytes = Math.max(result.memoryBytes, run.memory)
       result.cases.push({ number: index + 1, verdict, timeMs: run.time / 1e6, memoryBytes: run.memory })

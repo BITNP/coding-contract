@@ -35,9 +35,9 @@ public class Main {
   assert.equal(result.verdict, 'AC', result.message)
 })
 
-test('原生语言遵守 4 MiB 内存档，运行时超限返回 MLE', integration, async () => {
+test('原生语言遵守 4 MB 内存档，运行时超限返回 MLE', integration, async () => {
   for (const language of ['c', 'cpp', 'rust']) {
-    const result = await submit(language, question.templates[language], ['ancient-3', 'memory-3'])
+    const result = await submit(language, question.templates[language], ['ancient-3', 'memory-2'])
     assert.equal(result.verdict, 'AC', JSON.stringify(result))
     assert.equal(result.passed, true)
   }
@@ -47,6 +47,16 @@ test('原生语言遵守 4 MiB 内存档，运行时超限返回 MLE', integrati
   ])
   assert.equal(result.verdict, 'MLE', JSON.stringify(result))
   assert.equal(result.checks.find((check) => check.id === 'memory-2').status, 'failed')
+})
+
+test('C++ 相同源码在 325.325 kB 与 4 MB 档使用一致的运行条件', integration, async () => {
+  for (let round = 0; round < 3; round++) {
+    const strict = await submit('cpp', question.templates.cpp, ['ancient-3', 'memory-3'])
+    const relaxed = await submit('cpp', question.templates.cpp, ['ancient-3', 'memory-2'])
+    assert.equal(strict.verdict, 'MLE', JSON.stringify(strict))
+    assert.equal(relaxed.verdict, 'AC', JSON.stringify(relaxed))
+    assert.equal(relaxed.cases.length, cases.length)
+  }
 })
 
 test('编译错误、类型错误、答案错误、运行错误、超时和输出超限分别返回', integration, async () => {

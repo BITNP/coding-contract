@@ -8,6 +8,7 @@
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --test tests/*.test.js server/tests/*.test.js",
     "test:judge": "JUDGE_INTEGRATION=1 node --test tests/*.test.js server/tests/*.test.js",
+    "bench:memory": "node dev/benchmark-memory.js",
     "judge:install": "node dev/install-judge.js",
     "judge:start": "limactl start --tty=false pioneer-judge",
     "judge:stop": "limactl stop pioneer-judge"
