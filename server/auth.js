@@ -131,7 +131,11 @@ export function createAuth(config, { discover = oidc.discovery, now = Date.now }
       })
       const claims = tokens.claims()
       if (!claims?.sub) throw new Error('Missing subject')
-      const user = { id: claims.sub, name: claims.name || claims.preferred_username || claims.sub }
+      const user = {
+        id: claims.sub,
+        name: claims.name || claims.preferred_username || claims.sub,
+        avatar: claims.picture || null,
+      }
       sessions.delete(req.sid)
       const sid = randomUUID()
       sessions.set(sid, { user, expiresAt: now() + sessionAge })

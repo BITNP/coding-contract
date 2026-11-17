@@ -32,6 +32,9 @@ import 'monaco-editor/features/wordPartOperations/register.js'
 import 'monaco-editor/editor/browser/coreCommands.js'
 import 'monaco-editor/editor/contrib/suggest/browser/suggestController.js'
 import 'monaco-editor/editor/contrib/dropOrPasteInto/browser/copyPasteContribution.js'
+import 'monaco-editor/editor/contrib/semanticTokens/browser/documentSemanticTokens.js'
+import 'monaco-editor/editor/contrib/semanticTokens/browser/viewportSemanticTokens.js'
+import { registerLanguage } from 'monaco-editor/languages/definitions/_.contribution.js'
 import 'monaco-editor/languages/definitions/cpp/register.js'
 import 'monaco-editor/languages/definitions/python/register.js'
 import 'monaco-editor/languages/definitions/java/register.js'
@@ -48,6 +51,23 @@ import 'monaco-editor/languages/definitions/lua/register.js'
 import 'monaco-editor/languages/definitions/perl/register.js'
 import 'monaco-editor/languages/definitions/r/register.js'
 import 'monaco-editor/languages/definitions/shell/register.js'
+
+registerLanguage({ id: 'javascript-basic', loader: () => import('monaco-editor/languages/definitions/javascript/javascript.js') })
+registerLanguage({ id: 'typescript-basic', loader: () => import('monaco-editor/languages/definitions/typescript/typescript.js') })
+const basicModes = { javascript: 'javascript-basic', typescript: 'typescript-basic' }
+
+const silenced = { hover: { enabled: false }, parameterHints: { enabled: false }, 'semanticHighlighting.enabled': false }
+const bare = {
+  ...silenced,
+  quickSuggestions: false, suggestOnTriggerCharacters: false, wordBasedSuggestions: 'off', snippetSuggestions: 'none', tabCompletion: 'off',
+  bracketPairColorization: { enabled: false }, guides: { bracketPairs: false, indentation: false },
+  matchBrackets: 'never', occurrencesHighlight: 'off', selectionHighlight: false, links: false,
+  folding: false, stickyScroll: { enabled: false }, renderLineHighlight: 'none', renderWhitespace: 'none',
+  autoClosingBrackets: 'never', autoClosingQuotes: 'never', autoSurround: 'never', autoIndent: 'none',
+  contextmenu: false, dragAndDrop: false, mouseWheelZoom: false,
+  cursorBlinking: 'blink', cursorSmoothCaretAnimation: 'off', smoothScrolling: false,
+}
+const masks = [{}, silenced, bare]
 
 self.MonacoEnvironment = {
   getWorker: (_, label) =>
@@ -157,9 +177,12 @@ import { languageById } from '../../shared/languages.js'
 import { sourceFacts } from '../sourceFacts.js'
 import { attachLanguageService, detachLanguageService } from '../lsp/index.js'
 
-const props = defineProps({ modelValue: String, language: String, disabled: Boolean, marks: { type: Array, default: () => [] } })
+const props = defineProps({
+  modelValue: String, language: String, disabled: String, masked: { type: Number, default: 0 }, marks: { type: Array, default: () => [] },
+})
 const emit = defineEmits(['update:modelValue', 'run', 'save', 'cursor'])
 const element = ref(null)
+const plain = props.masked >= 3
 let editor
 let model
 let marks
@@ -174,11 +197,31 @@ async function analyze(source, language) {
 }
 defineExpose({ analyze })
 
+function attach() {
+  if (props.masked) detachLanguageService()
+  else attachLanguageService(model, props.language)
+}
+
+function plainCursor({ target: { value, selectionStart, selectionEnd, selectionDirection } }) {
+  const at = selectionDirection === 'backward' ? selectionStart : selectionEnd
+  const before = value.slice(0, at)
+  emit('cursor', { line: before.split('\n').length, column: at - before.lastIndexOf('\n'), selected: selectionEnd - selectionStart })
+}
+
+function plainShortcut(event) {
+  if (!(event.metaKey || event.ctrlKey) || event.altKey) return
+  const action = event.key === 'Enter' ? ['run', event.shiftKey ? 'submit' : 'sample'] : event.key === 's' && !event.shiftKey ? ['save'] : null
+  if (!action) return
+  event.preventDefault()
+  emit(...action)
+}
+
 onMounted(() => {
+  if (plain) return detachLanguageService()
   model = createModel(props.language, props.modelValue)
   editor = monaco.editor.create(element.value, {
     model, theme: 'pioneer', automaticLayout: true, fixedOverflowWidgets: true,
-    readOnly: props.disabled, readOnlyMessage: { value: '评测中，暂不可编辑' },
+    readOnly: Boolean(props.disabled), readOnlyMessage: { value: props.disabled },
     fontFamily: "'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace", fontSize: 14, lineHeight: 22, fontLigatures: false,
     padding: { top: 14, bottom: 14 }, tabSize: 4, detectIndentation: true, minimap: { enabled: false },
     scrollBeyondLastLine: false, overviewRulerLanes: 0, hideCursorInOverviewRuler: true,
@@ -193,6 +236,7 @@ onMounted(() => {
     quickSuggestions: { other: true, comments: false, strings: false }, suggestOnTriggerCharacters: true,
     wordBasedSuggestions: 'currentDocument', parameterHints: { enabled: true }, hover: { enabled: true, delay: 400 },
     'semanticHighlighting.enabled': true, contextmenu: true, ariaLabel: '源代码',
+    ...masks[props.masked],
   })
   marks = editor.createDecorationsCollection()
   showMarks()
@@ -207,11 +251,11 @@ onMounted(() => {
   editor.onDidChangeCursorSelection(cursor)
   cursor()
   editor.onDidChangeModelContent(() => emit('update:modelValue', editor.getValue()))
-  attachLanguageService(model, props.language)
+  attach()
 })
 function createModel(language, value) {
   const { editor: mode, filename } = languageById[language]
-  return monaco.editor.createModel(value, mode, monaco.Uri.file(`/workspace/${filename}`))
+  return monaco.editor.createModel(value, (props.masked && basicModes[mode]) || mode, monaco.Uri.file(`/workspace/${filename}`))
 }
 watch(() => props.modelValue, value => {
   if (editor && value !== editor.getValue()) editor.setValue(value)
@@ -221,7 +265,7 @@ watch(() => props.language, (language) => {
   const previous = model
   model = createModel(language, props.modelValue)
   editor.setModel(model)
-  attachLanguageService(model, language)
+  attach()
   previous.dispose()
   showMarks()
 })
@@ -236,7 +280,7 @@ function showMarks() {
   }))
 }
 watch(() => props.marks, showMarks)
-watch(() => props.disabled, readOnly => editor?.updateOptions({ readOnly }))
+watch(() => props.disabled, (lock) => editor?.updateOptions({ readOnly: Boolean(lock), readOnlyMessage: { value: lock } }))
 onBeforeUnmount(() => {
   detachLanguageService()
   editor?.dispose()
@@ -245,9 +289,26 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="element" class="source-editor monaco-component" />
+  <textarea
+    v-if="plain"
+    class="plain-editor"
+    :value="modelValue"
+    :readonly="Boolean(disabled)"
+    spellcheck="false"
+    autocomplete="off"
+    autocapitalize="off"
+    aria-label="源代码"
+    @input="emit('update:modelValue', $event.target.value)"
+    @selectionchange="plainCursor"
+    @keydown="plainShortcut"
+  />
+  <div v-else ref="element" class="source-editor monaco-component" />
 </template>
 
 <style scoped>
 .source-editor { height: 100%; min-width: 0 }
+.plain-editor {
+  width: 100%; height: 100%; margin: 0; padding: 14px 18px; border: 0; outline: none; resize: none;
+  background: #141517; color: #dad9d6; font: 400 14px/22px var(--font-sans); tab-size: 4;
+}
 </style>

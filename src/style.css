@@ -220,6 +220,11 @@ p {
   justify-content: space-between;
   border-bottom: 1px solid #ffffff1c;
 }
+.header-status {
+  display: flex;
+  align-items: center;
+  margin: 0 auto 0 28px;
+}
 .brand {
   display: inline-flex;
   align-items: center;

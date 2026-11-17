@@ -66,7 +66,7 @@ async function toggleFullscreen() {
   <NConfigProvider :theme="darkTheme" :theme-overrides="themeOverrides">
     <NMessageProvider>
       <div class="app-shell">
-        <header class="app-header">
+        <header v-if="!route.meta.bare" class="app-header">
           <a
             class="brand"
             href="/"
@@ -78,6 +78,7 @@ async function toggleFullscreen() {
             {{ inOperation ? '作战终端' : '网协合约'
             }}<span v-if="!inOperation" class="brand-event">开拓测试作战</span>
           </a>
+          <div id="header-status" class="header-status" />
           <div class="header-actions">
             <span v-if="connection === 'offline'" class="connection"><i />连接中断</span>
             <UiButton

@@ -7,7 +7,8 @@ async function request(path, options = {}) {
     ...options,
   })
   const data = await response.json()
-  if (!response.ok) throw new Error(data.message || '连接失败，请稍后重试')
+  if (!response.ok)
+    throw Object.assign(new Error(data.message || '连接失败，请稍后重试'), { status: response.status })
   return data
 }
 
@@ -18,8 +19,13 @@ export const api = {
   login: (returnTo = '/') => window.location.assign(`${base}/auth/login?${new URLSearchParams({ returnTo })}`),
   logout: () => post('/auth/logout'),
   record: () => request('/records/best'),
+  leaderboard: () => request('/leaderboard'),
   start: (ids, language) => post('/operations', { indicators: ids, language }),
   operation: (id) => request(`/operations/${id}`),
   sample: (id, submission) => post(`/operations/${id}/sample`, submission),
   submit: (id, submission) => post(`/operations/${id}/submit`, submission),
+  activity: (id, report, keepalive = false) =>
+    request(`/operations/${id}/activity`, { method: 'POST', body: JSON.stringify(report), keepalive }),
+  adminOperations: (all) => request(`/admin/operations${all ? '?all=1' : ''}`),
+  adminOperation: (id) => request(`/admin/operations/${id}`),
 }

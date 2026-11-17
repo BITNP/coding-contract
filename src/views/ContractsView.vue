@@ -102,6 +102,7 @@ function importCode() {
 const starting = ref(false)
 async function start() {
   if (authAvailable.value && !user.value) return api.login('/')
+  document.documentElement.requestFullscreen?.().catch(() => {})
   starting.value = true
   try {
     const operation = await api.start(selectedIds.value, selectedLanguage.value)

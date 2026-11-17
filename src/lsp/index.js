@@ -50,6 +50,7 @@ export function retryLanguageService() {
 }
 
 export function detachLanguageService() {
+  lspStatus.value = { state: 'none', progress: 0 }
   if (!current) return
   current.abort.abort()
   current.stop?.()

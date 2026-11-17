@@ -6,10 +6,20 @@ const syntaxChecks = new Set(['names', 'syntax', 'operators'])
 // 检查源码中定义的名字；C/C++ 入口 main 豁免，标准库声明不参与检查。
 export const groups = [
   {
+    id: 'time',
+    name: '环境：时限',
+    column: 0,
+    verification: 'environment',
+    variants: [
+      { level: 1, description: '作战时限减少 10 分钟', minutes: 10 },
+      { level: 2, description: '作战时限减少 20 分钟', minutes: 20 },
+      { level: 3, description: '作战时限减少 30 分钟', minutes: 30 },
+    ],
+  },
+  {
     id: 'ancient',
     name: '古法编程',
-    icon: 302,
-    column: 3,
+    column: 4,
     verification: 'manual',
     variants: [
       { level: 1, description: '禁用大模型思考模式' },
@@ -20,8 +30,7 @@ export const groups = [
   {
     id: 'shrink',
     name: '改写：谜语人',
-    icon: 101,
-    column: 4,
+    column: 5,
     requires: ['ancient-3'],
     variants: [
       {
@@ -45,8 +54,7 @@ export const groups = [
   {
     id: 'source',
     name: '环境：存储枯竭',
-    icon: 111,
-    column: 0,
+    column: 1,
     variants: [
       { level: 1, description: '源代码长度上限 1024 字节', checks: [{ type: 'maxBytes', limit: 1024 }] },
       { level: 2, description: '源代码长度上限 512 字节', checks: [{ type: 'maxBytes', limit: 512 }] },
@@ -56,8 +64,7 @@ export const groups = [
   {
     id: 'memory',
     name: '环境：内存枯竭',
-    icon: 114,
-    column: 5,
+    column: 6,
     requires: ['ancient-3'],
     variants: [
       { level: 1, description: '运行内存上限 16 MB', checks: [{ type: 'maxMemory', limit: 16_000_000 }] },
@@ -73,8 +80,7 @@ export const groups = [
   {
     id: 'lines',
     name: '十行代码',
-    icon: 122,
-    column: 1,
+    column: 2,
     variants: [
       {
         level: 1,
@@ -86,8 +92,7 @@ export const groups = [
   {
     id: 'linear',
     name: '控制：线性思维',
-    icon: 117,
-    column: 6,
+    column: 7,
     requires: ['ancient-3'],
     variants: [
       {
@@ -106,8 +111,7 @@ export const groups = [
   {
     id: 'vowels',
     name: '改写：失语症',
-    icon: 103,
-    column: 7,
+    column: 8,
     requires: ['ancient-3'],
     variants: [
       {
@@ -120,8 +124,7 @@ export const groups = [
   {
     id: 'brackets',
     name: '控制：订书钉',
-    icon: 107,
-    column: 2,
+    column: 3,
     variants: [
       // 保留已创建作战和分享码中的 ID。
       {
@@ -135,8 +138,7 @@ export const groups = [
   {
     id: 'arithmetic',
     name: '控制：低等数学',
-    icon: 207,
-    column: 8,
+    column: 9,
     requires: ['ancient-3'],
     variants: [
       {
@@ -174,43 +176,59 @@ export const groups = [
     ],
   },
   {
-    id: 'keyboard',
-    name: '环境：静音',
-    icon: 124,
-    column: 9,
-    requires: ['ancient-3'],
-    verification: 'manual',
-    variants: [{ level: 3, description: '禁用实体键盘' }],
+    id: 'senses',
+    name: '环境：感官遮蔽',
+    column: 10,
+    verification: 'environment',
+    variants: [
+      { level: 1, description: '禁用代码提示及悬浮提示' },
+      { level: 2, description: '禁用代码提示及编辑辅助，仅保留语法着色' },
+      { level: 3, description: '禁用语法着色、等宽字体及一切编辑辅助' },
+    ],
   },
 ]
 
 export const indicators = groups.flatMap((group) =>
-  group.variants.map((variant) => ({
-    ...variant,
-    id: variant.id || `${group.id}-${variant.level}`,
-    group: group.id,
-    name: `${group.name} ${['I', 'II', 'III'][variant.level - 1]}`,
-    column: group.column,
-    icon: `/assets/icon_activity_contract_tag_${group.icon}.webp`,
-    points: variant.level,
-    languages:
-      variant.languages ||
-      languages
-        .filter(
-          (language) => language.analysis || !variant.checks?.some((rule) => syntaxChecks.has(rule.type)),
-        )
-        .map((language) => language.id),
-    verification: group.verification || 'automatic',
-    requires: group.requires || [],
-    locked: Boolean(group.requires?.length),
-    inherits: variant.inherits || [],
-    checks: variant.checks || [],
-  })),
+  group.variants.map((variant) => {
+    const id = variant.id || `${group.id}-${variant.level}`
+    return {
+      ...variant,
+      id,
+      group: group.id,
+      name:
+        group.variants.length > 1 ? `${group.name} ${['I', 'II', 'III'][variant.level - 1]}` : group.name,
+      column: group.column,
+      icon: `/assets/indicators/${id}.webp`,
+      points: variant.level,
+      languages:
+        variant.languages ||
+        languages
+          .filter(
+            (language) =>
+              language.analysis || !variant.checks?.some((rule) => syntaxChecks.has(rule.type)),
+          )
+          .map((language) => language.id),
+      verification: group.verification || 'automatic',
+      requires: group.requires || [],
+      locked: Boolean(group.requires?.length),
+      inherits: variant.inherits || [],
+      checks: variant.checks || [],
+    }
+  }),
 )
 
 export const defaultSelection = []
 export const columnCount = groups.length
 export const contractById = Object.fromEntries(indicators.map((item) => [item.id, item]))
+
+export const operationMinutes = 60
+export const submitGraceMs = 90_000
+
+export const timeLimit = (ids) =>
+  operationMinutes - ids.reduce((sum, id) => sum + (contractById[id]?.minutes || 0), 0)
+
+export const senseLevel = (ids) =>
+  ids.map((id) => contractById[id]).find((item) => item?.group === 'senses')?.level || 0
 
 export function checksFor(id) {
   const item = contractById[id]

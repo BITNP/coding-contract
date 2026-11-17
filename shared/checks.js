@@ -70,6 +70,8 @@ export function checkContracts(ids, facts, source) {
     const item = contractById[id]
     if (item.verification === 'manual')
       return { id, name: item.name, points: item.points, status: 'manual', messages: [] }
+    if (item.verification === 'environment')
+      return { id, name: item.name, points: item.points, status: 'passed', messages: [], ranges: [] }
     const rules = checksFor(id)
     const available = rules.filter(
       (rule) => !requiredFacts[rule.type] || facts[requiredFacts[rule.type]] !== undefined,

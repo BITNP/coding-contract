@@ -14,6 +14,8 @@ const router = createRouter({
   routes: [
     { path: '/', component: ContractsView },
     { path: '/operation/:id', component: () => import('./views/OperationView.vue') },
+    { path: '/admin', component: () => import('./views/AdminView.vue') },
+    { path: '/leaderboard', component: () => import('./views/LeaderboardView.vue'), meta: { bare: true } },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })

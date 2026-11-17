@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
-import { NSpin, useMessage } from 'naive-ui'
+import { useRoute, useRouter } from 'vue-router'
+import { NModal, NSpin, useMessage } from 'naive-ui'
 import {
   Check,
   Code2,
@@ -17,20 +17,25 @@ import {
   ChevronDown,
   Hourglass,
   LoaderCircle,
+  Timer,
+  Maximize,
 } from 'lucide-vue-next'
 import { api } from '../api.js'
-import { indicators, selectionErrors, checksFor } from '../../shared/contracts.js'
+import { indicators, selectionErrors, checksFor, senseLevel, submitGraceMs } from '../../shared/contracts.js'
 import { languages } from '../../shared/languages.js'
 import { checkContracts } from '../../shared/checks.js'
 import { best } from '../state.js'
+import { readDraft, writeDraft } from '../drafts.js'
+import { useIntegrity } from '../integrity.js'
 import UiButton from '../components/UiButton.vue'
 import UiMenu from '../components/UiMenu.vue'
 import CodeEditor from '../components/CodeEditor.vue'
 import MarkdownContent from '../components/MarkdownContent.vue'
 import IndicatorPopover from '../components/IndicatorPopover.vue'
-import LspStatus from '../components/LspStatus.vue'
+import EditorSenses from '../components/EditorSenses.vue'
 
 const route = useRoute()
+const router = useRouter()
 const message = useMessage()
 const operation = ref(null)
 const error = ref('')
@@ -42,40 +47,39 @@ const result = ref(null)
 const checked = ref(null)
 const codeEditor = ref(null)
 const analyzed = ref({ source: '', facts: { bytes: 0 } })
-const drafts = new Map()
 const cursor = ref({ line: 1, column: 1, selected: 0 })
 const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl+'
 const operationId = route.params.id
-const draftKey = `pioneer:draft:${operationId}`
-function readDraft() {
-  try {
-    return JSON.parse(localStorage.getItem(draftKey))
-  } catch {
-    return null
-  }
-}
-function saveDraft() {
-  if (!operation.value) return
-  drafts.set(language.value, source.value)
-  try {
-    localStorage.setItem(
-      draftKey,
-      JSON.stringify({ language: language.value, sources: Object.fromEntries(drafts) }),
-    )
-    return true
-  } catch {
-    return false
-  }
-}
+let baseline = ''
 let draftTimer = 0
-watch([source, language], () => {
+function saveDraft() {
+  clearTimeout(draftTimer)
+  if (!operation.value || source.value === baseline) return true
+  if (!writeDraft(language.value, source.value)) return false
+  baseline = source.value
+  return true
+}
+watch(source, () => {
   clearTimeout(draftTimer)
   draftTimer = setTimeout(saveDraft, 400)
 })
 function save() {
-  clearTimeout(draftTimer)
   if (saveDraft()) message.success('草稿已保存在本地')
   else message.error('草稿保存失败，请检查浏览器本地存储')
+}
+function latestSource(lang) {
+  const { submission, question } = operation.value
+  const submitted = submission?.language === lang && {
+    source: submission.source,
+    savedAt: Date.parse(submission.submittedAt),
+  }
+  const draft = readDraft(lang)
+  const latest = draft && (!submitted || draft.savedAt > submitted.savedAt) ? draft : submitted
+  return latest ? latest.source : question.templates[lang]
+}
+function open(lang) {
+  language.value = lang
+  source.value = baseline = latestSource(lang)
 }
 const resultAccepted = computed(
   () =>
@@ -83,6 +87,42 @@ const resultAccepted = computed(
 )
 const passedCases = computed(() => result.value?.cases.filter((item) => item.verdict === 'AC').length || 0)
 const ids = computed(() => operation.value?.question.contracts || [])
+const masked = computed(() => senseLevel(ids.value))
+
+const clockOffset = ref(0)
+const now = ref(Date.now())
+const settlement = ref(null)
+const settlementOpen = ref(false)
+const deadline = computed(() => operation.value?.deadline && Date.parse(operation.value.deadline))
+const remaining = computed(() => deadline.value && Math.max(0, deadline.value - now.value - clockOffset.value))
+const ended = computed(() => remaining.value === 0)
+const countdown = computed(() => {
+  const seconds = Math.ceil(remaining.value / 1000)
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+})
+let clock = 0
+let task = Promise.resolve()
+async function settle() {
+  await task
+  const { submission } = operation.value
+  const settled = submission && Date.parse(submission.submittedAt) >= deadline.value
+  const overdue = Date.now() + clockOffset.value - deadline.value
+  const final = !settled && overdue < submitGraceMs ? await run('submit', true) : null
+  try {
+    best.value = (await api.record()).score
+  } catch {}
+  settlement.value = { score: final?.score ?? null, best: best.value }
+  settlementOpen.value = true
+}
+watch(ended, (value) => value && settle())
+
+const live = computed(() => Boolean(operation.value) && !ended.value)
+const integrity = useIntegrity(operationId, {
+  active: () => live.value,
+  snapshot: () => ({ source: source.value, language: language.value }),
+})
+const { fullscreen } = integrity
+const fullscreenRequired = computed(() => live.value && integrity.supported && !fullscreen.value)
 const facts = computed(() => analyzed.value.facts)
 const localChecks = computed(() => checkContracts(ids.value, facts.value, analyzed.value.source))
 const marks = computed(() =>
@@ -129,13 +169,14 @@ async function load() {
   error.value = ''
   try {
     operation.value = await api.operation(operationId)
-    const draft = readDraft()
+    clockOffset.value = operation.value.serverTime - Date.now()
+    integrity.record('open')
     const submitted = operation.value.submission
-    drafts.clear()
-    if (submitted) drafts.set(submitted.language, submitted.source)
-    for (const [key, code] of Object.entries(draft?.sources || {})) drafts.set(key, code)
-    language.value = draft?.language || submitted?.language || operation.value.language
-    source.value = drafts.get(language.value) ?? operation.value.question.templates[language.value]
+    open(
+      [history.state?.language, submitted?.language].find(
+        (lang) => lang && !selectionErrors(ids.value, lang).length,
+      ) || operation.value.language,
+    )
     result.value =
       submitted?.language === language.value && submitted.source === source.value ? submitted.result : null
     checked.value = result.value
@@ -147,10 +188,9 @@ async function load() {
 }
 function changeLanguage(value) {
   if (value === language.value) return
-  drafts.set(language.value, source.value)
-  language.value = value
-  source.value = drafts.get(value) ?? operation.value.question.templates[value]
   saveDraft()
+  history.replaceState({ ...history.state, language: value }, '')
+  open(value)
 }
 watch(
   [source, language, codeEditor],
@@ -187,14 +227,21 @@ watch(
   { flush: 'sync' },
 )
 const blocked = (action) =>
+  ended.value ||
   (Boolean(running.value) && running.value !== action) ||
   (action === 'submit' && failedChecks.value.length > 0)
 const hint = (action) =>
-  action.key === 'submit' && failedChecks.value.length
+  ended.value
+    ? '作战时限已到'
+    : action.key === 'submit' && failedChecks.value.length
     ? `未满足${failedChecks.value.map((item) => `「${item.name}」`).join('')}，暂不可提交`
     : action.shortcut
-async function run(action) {
-  if (running.value || blocked(action)) return
+function run(action, final = false) {
+  if (running.value || (!final && blocked(action))) return task
+  task = execute(action)
+  return task
+}
+async function execute(action) {
   const errors = selectionErrors(ids.value, language.value)
   if (errors.length) return message.warning(errors.join('；'))
   running.value = action
@@ -206,15 +253,21 @@ async function run(action) {
       best.value = (await api.record()).score
       message.success('提交已记录')
     }
+    return result.value
   } catch (error) {
     message.error(error.message)
   } finally {
     running.value = ''
   }
 }
-onMounted(load)
+onMounted(() => {
+  load()
+  addEventListener('pagehide', saveDraft)
+  clock = setInterval(() => (now.value = Date.now()), 250)
+})
 onBeforeUnmount(() => {
-  clearTimeout(draftTimer)
+  clearInterval(clock)
+  removeEventListener('pagehide', saveDraft)
   saveDraft()
 })
 </script>
@@ -248,18 +301,18 @@ onBeforeUnmount(() => {
         <header class="panel-heading">
           <h2><Code2 :size="18" />代码编辑</h2>
           <div class="editor-tools">
-            <LspStatus />
+            <EditorSenses :masked="masked" />
             <UiMenu
               v-slot="{ toggle }"
               :options="languageOptions"
-              :disabled="Boolean(running)"
+              :disabled="Boolean(running) || ended"
               placement="bottom-end"
               max-height="min(440px, 60vh)"
               @select="changeLanguage"
             >
               <button
                 class="language-select"
-                :disabled="Boolean(running)"
+                :disabled="Boolean(running) || ended"
                 :aria-label="`编程语言：${languageName}`"
                 @click="toggle"
               >
@@ -274,7 +327,8 @@ onBeforeUnmount(() => {
             ref="codeEditor"
             v-model="source"
             :language="language"
-            :disabled="Boolean(running)"
+            :disabled="running ? '评测中，暂不可编辑' : ended ? '作战时限已到，代码已锁定' : ''"
+            :masked="masked"
             :marks="marks"
             @run="run"
             @save="save"
@@ -407,6 +461,52 @@ onBeforeUnmount(() => {
         </ul>
       </aside>
     </div>
+
+    <Transition name="gate">
+      <div v-if="fullscreenRequired" class="fullscreen-gate" role="dialog" aria-modal="true" aria-labelledby="gate-title">
+        <Maximize :size="34" />
+        <h2 id="gate-title">作战需全程全屏进行</h2>
+        <p>退出全屏、切换窗口或标签页都会被记录，并随作战一同提交。</p>
+        <UiButton kind="primary" @click="integrity.enter">进入全屏，继续作战</UiButton>
+        <span v-if="deadline" class="gate-clock num"><Timer :size="15" />{{ countdown }}</span>
+      </div>
+    </Transition>
+
+    <Teleport v-if="deadline" to="#header-status">
+      <span
+        class="countdown"
+        :class="{ urgent: remaining < 300_000 }"
+        :title="ended ? '作战时限已到' : '剩余作战时间，到时自动提交并结算'"
+        role="timer"
+        ><Timer :size="18" /><b class="num">{{ countdown }}</b></span
+      >
+    </Teleport>
+
+    <NModal
+      v-model:show="settlementOpen"
+      preset="card"
+      class="game-modal"
+      title="作战结算"
+      :bordered="false"
+      style="width: 520px"
+    >
+      <div class="modal-kicker">TIME LIMIT REACHED</div>
+      <div v-if="settlement" class="intel-stats">
+        <div>
+          <strong>{{ settlement.score ?? '—' }}</strong><span>本次结算</span>
+        </div>
+        <div>
+          <strong>{{ operation.question.score }}</strong><span>指标总计</span>
+        </div>
+        <div>
+          <strong>{{ settlement.best }}</strong><span>最终成绩 · 历史最高</span>
+        </div>
+      </div>
+      <footer class="settlement-actions">
+        <UiButton kind="dark" @click="settlementOpen = false">查看代码</UiButton>
+        <UiButton kind="primary" @click="router.push('/')">返回指标选择</UiButton>
+      </footer>
+    </NModal>
   </main>
 </template>
 
@@ -471,6 +571,71 @@ onBeforeUnmount(() => {
 }
 .panel-heading h2 svg {
   color: var(--muted);
+}
+.countdown {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+.countdown b {
+  font-size: 20px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  color: var(--text);
+  transition: color 0.2s;
+}
+.countdown.urgent b {
+  color: #ff4d6a;
+}
+.fullscreen-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: #0b0c0fd9;
+  backdrop-filter: blur(14px);
+  color: var(--soft);
+  text-align: center;
+}
+.fullscreen-gate > svg {
+  color: var(--orange);
+}
+.fullscreen-gate h2 {
+  font-size: 24px;
+  font-weight: 500;
+  color: var(--text);
+}
+.fullscreen-gate p {
+  margin-bottom: 8px;
+  font-size: 15px;
+  color: var(--muted);
+}
+.gate-clock {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 16px;
+  color: var(--muted);
+}
+.gate-enter-active,
+.gate-leave-active {
+  transition: opacity 0.2s;
+}
+.gate-enter-from,
+.gate-leave-to {
+  opacity: 0;
+}
+.settlement-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
 }
 .limits {
   flex: none;

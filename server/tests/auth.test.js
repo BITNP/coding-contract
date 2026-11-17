@@ -179,7 +179,7 @@ test('真实授权码交换、PKCE、签名校验、个人身份、退出及会�
   )
   assert.deepEqual(
     (await (await fetch(`${f.base}/api/session`, { headers: { cookie: session } })).json()).user,
-    { id: 'alice', name: 'Alice' },
+    { id: 'alice', name: 'Alice', avatar: null },
   )
   assert.deepEqual(await (await fetch(`${f.base}/private`, { headers: { cookie: session } })).json(), {
     owner: 'alice',
