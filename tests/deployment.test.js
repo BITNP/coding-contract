@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict'
-import { join } from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
 import { json } from 'node:stream/consumers'
 import { test } from 'node:test'
 import { setTimeout as delay } from 'node:timers/promises'
+import { openDatabase } from '../server/database.js'
 import maxRise from '../server/questions/max-rise.js'
 import maze from '../server/questions/maze.js'
 import { submitGraceMs } from '../shared/contracts.js'
@@ -12,6 +11,7 @@ import { listen, startApi } from '../server/tests/http.js'
 const answers = new Map([...maxRise.cases, ...maze.cases].map(({ input, answer }) => [input, answer]))
 const start = { language: 'python', indicators: ['source-1'] }
 const source = 'print(1)'
+const answer = { source, question: 'max-rise' }
 
 async function fixture(t) {
   let beforeAnalysis
@@ -26,7 +26,7 @@ async function fixture(t) {
       await pause?.()
       stdout = JSON.stringify({ bytes: Buffer.byteLength(cmd.copyIn['main.py'].content), codeLines: 1 })
     } else {
-      stdout = answers.get(cmd.files[0].content)
+      stdout = cmd.copyIn['main.py'].content === source ? answers.get(cmd.files[0].content) : 'wrong'
     }
     res.end(JSON.stringify([{ status: 'Accepted', files: { stdout, stderr: '' }, time: 0, memory: 0 }]))
   })
@@ -42,7 +42,7 @@ async function fixture(t) {
     return result
   }
   function moveDeadline(id, msAgo) {
-    const db = new DatabaseSync(join(dir, 'operations.sqlite'))
+    const db = openDatabase(dir)
     const deadline = new Date(Date.now() - msAgo).toISOString()
     const createdAt = new Date(Date.parse(deadline) - 3_600_000).toISOString()
     try {
@@ -64,7 +64,7 @@ async function fixture(t) {
       entered.resolve()
       return release.promise
     }
-    const submission = request(`${path}/submit`, { version, source }, status)
+    const submission = request(`${path}/submit`, { version, ...answer }, status)
     try {
       await Promise.race([entered.promise, submission.then(() => assert.fail('评测请求未到达沙箱'))])
       await action()
@@ -77,7 +77,7 @@ async function fixture(t) {
   return { base, request, moveDeadline, duringSubmit }
 }
 
-test('作战复用活动局，输入校验保护配置，重复放弃只推进一次', async (t) => {
+test('作战复用活动局，三道题均可查看，放弃后直接结束', async (t) => {
   const { base, request } = await fixture(t)
   assert.equal((await fetch(base)).status, 404)
   assert.equal((await fetch(`${base}/app.js`)).status, 404)
@@ -86,24 +86,27 @@ test('作战复用活动局，输入校验保护配置，重复放弃只推进�
   await request('/operations', { indicators: [] }, 400)
   const [first, again] = await Promise.all([request('/operations', start), request('/operations', start)])
   assert.equal(again.id, first.id)
+  assert.deepEqual(first.questions.map((q) => q.id).sort(), ['channel-schedule', 'max-rise', 'maze'])
+  assert.ok(first.questions.every((q) => q.content && !('cases' in q)))
   const path = `/operations/${first.id}`
   const { version } = first
-  assert.deepEqual(first.rounds[1], { index: 1, phase: 'pending' })
   assert.deepEqual(await request('/operations/current'), { id: first.id })
   await request(`${path}/contracts`, { version, language: 'python' }, 400)
   await request(`${path}/contracts`, { version, indicators: [] }, 400)
-  await request(`${path}/submit`, { version }, 400)
+  await request(`${path}/sample`, { version, source }, 400)
+  await request(`${path}/validate`, { version, source, question: ['maze'] }, 400)
+  await request(`${path}/submit`, { version, source, question: 'constructor' }, 400)
+  await request(`${path}/submit`, { version, question: 'maze' }, 400)
   await request(`${path}/abandon`, {}, 400)
-  assert.deepEqual((await request(path)).rounds[0].contracts, ['source-1'])
-  const next = await request(`${path}/abandon`, { version })
+  assert.deepEqual((await request(path)).contracts, ['source-1'])
+  const finished = await request(`${path}/abandon`, { version })
   await request(`${path}/abandon`, { version }, 409)
-  const saved = await request(path)
-  assert.equal(saved.current, 1)
-  assert.equal(saved.version, next.version)
-  assert.equal(saved.rounds[1].phase, 'choosing')
+  assert.equal(finished.phase, 'abandoned')
+  assert.equal(finished.score, 0)
+  assert.equal((await request('/operations/current')).id, null)
 })
 
-test('判题期间修改指标会拒绝过期结果，最终放弃保存完整的回合成绩', async (t) => {
+test('拒绝过期评测，答错后可换题，任意一题通过即按当前指标结算', async (t) => {
   const { request, duringSubmit } = await fixture(t)
   const first = await request('/operations', start)
   const path = `/operations/${first.id}`
@@ -112,38 +115,43 @@ test('判题期间修改指标会拒绝过期结果，最终放弃保存完整�
     path,
     first.version,
     async () => {
-      await request(`${path}/submit`, { version: first.version, source }, 409)
+      await request(`${path}/submit`, { version: first.version, ...answer }, 409)
       await request(`${path}/contracts`, change)
     },
     409,
   )
-  const adjusted = await request(path)
-  assert.equal(adjusted.current, 0)
-  const submission = { version: adjusted.version, source }
-  assert.equal((await request(`${path}/validate`, submission)).verdict, 'CHECKED')
-  assert.equal((await request(`${path}/sample`, submission)).cases.length, 1)
-  const passed = await request(`${path}/submit`, submission)
-  assert.ok(passed.rounds[adjusted.current].submission.result.passed)
-  assert.equal(passed.total, 2)
+  const { version, submission } = await request(path)
+  assert.equal(submission, undefined)
+  const failed = await request(`${path}/submit`, { version, ...answer, source: 'print(0)' })
+  assert.equal(failed.phase, 'active')
+  assert.equal(failed.submission.result.verdict, 'WA')
+  assert.equal(failed.submission.question, 'max-rise')
   assert.deepEqual(await request('/leaderboard'), [])
-  const chosen = await request(`${path}/choose`, { version: passed.version, question: 'maze' })
-  assert.equal(chosen.rounds[1].language, 'python')
-  const second = await request(`${path}/submit`, { version: chosen.version, source })
-  assert.equal(second.total, 4)
-  assert.equal((await request('/records/best')).score, 0)
-  const finished = await request(`${path}/abandon`, { version: second.version })
+
+  const next = { version: failed.version, source, question: 'maze' }
+  const snapshot = { source, language: 'python', question: 'maze' }
+  await request(`${path}/activity`, { events: [], snapshot: { source, language: 'python' } }, 400)
+  await request(`${path}/activity`, { events: [], snapshot })
+  assert.equal((await request(`/admin${path}`)).live.question, maze.title)
+  assert.equal((await request(`${path}/validate`, next)).verdict, 'CHECKED')
+  assert.equal((await request(`${path}/sample`, next)).cases.length, 1)
+  const passed = await request(`${path}/submit`, next)
+  assert.equal(passed.phase, 'passed')
+  assert.equal(passed.score, 2)
+  assert.equal(passed.submission.question, 'maze')
+  assert.equal(passed.submission.result.totalCases, maze.cases.length)
+  await request(`${path}/submit`, { ...next, version: passed.version, question: 'max-rise' }, 403)
   const [record] = await request('/leaderboard')
-  assert.ok(finished.finishedAt)
-  assert.equal(record.score, 4)
-  assert.deepEqual(
-    record.rounds.map((round) => round.phase),
-    ['passed', 'passed', 'abandoned'],
-  )
-  assert.equal((await request('/records/best')).score, 4)
+  assert.equal(record.question, maze.title)
+  assert.deepEqual(record.contracts, change.indicators)
+  assert.equal(record.score, 2)
+  assert.equal((await request('/records/best')).score, 2)
   const [summary] = (await request('/admin/operations?all=1')).operations
   const detail = await request(`/admin${path}`)
+  assert.equal(summary.question, maze.title)
   assert.equal(summary.submission.source, undefined)
   assert.equal(detail.submission.source, source)
+  assert.equal(detail.submission.question, maze.title)
 })
 
 test('宽限期内复用原局，已受理的提交判完后结算', async (t) => {
@@ -152,36 +160,29 @@ test('宽限期内复用原局，已受理的提交判完后结算', async (t) =
   const path = `/operations/${first.id}`
   const deadline = moveDeadline(first.id, submitGraceMs - 2000)
   assert.equal((await request('/operations', start)).id, first.id)
-  await request(`${path}/sample`, { version: first.version, source }, 403)
-  const operation = await duringSubmit(path, first.version, async () => {
+  await request(`${path}/sample`, { version: first.version, ...answer }, 403)
+  const passed = await duringSubmit(path, first.version, async () => {
     await delay(Math.max(0, Date.parse(deadline) + submitGraceMs + 50 - Date.now()))
     assert.deepEqual(await request('/leaderboard'), [])
     assert.equal((await request('/operations', start)).id, first.id)
   })
-  assert.ok(operation.rounds[first.current].submission.result.passed && operation.finishedAt)
-  assert.equal(operation.total, 1)
-  assert.equal((await request('/records/best')).score, 1)
-  assert.notEqual((await request('/operations', start)).id, first.id)
+  assert.equal(passed.finishedAt, deadline)
+  assert.equal(passed.score, 1)
+  assert.equal((await request('/leaderboard'))[0].durationMs, 3_600_000)
 })
 
-test('选题到点结算，作答在宽限结束后结算，允许重新开局', async (t) => {
+test('超时按零分结算，可重新开局', async (t) => {
   const { request, moveDeadline } = await fixture(t)
   const first = await request('/operations', start)
   const path = `/operations/${first.id}`
-  const operation = await request(`${path}/submit`, { version: first.version, source })
-  const deadline = moveDeadline(first.id, 1000)
+  const deadline = moveDeadline(first.id, submitGraceMs + 1000)
   const finished = await request(path)
   assert.equal(finished.finishedAt, deadline)
-  assert.equal(finished.rounds[operation.current].phase, 'expired')
-  await request(`${path}/submit`, { version: finished.version, source }, 403)
-  const [record] = await request('/leaderboard')
-  assert.equal(record.durationMs, 3_600_000)
-  assert.equal(record.score, 1)
-  assert.equal((await request('/operations/current')).id, null)
-  const next = await request('/operations', start)
-  assert.notEqual(next.id, first.id)
-  moveDeadline(next.id, submitGraceMs + 1000)
-  assert.equal((await request(`/operations/${next.id}`)).rounds[0].phase, 'expired')
+  assert.equal(finished.phase, 'expired')
+  assert.equal(finished.score, 0)
+  await request(`${path}/submit`, { version: finished.version, ...answer }, 403)
+  assert.deepEqual(await request('/leaderboard'), [])
+  assert.notEqual((await request('/operations', start)).id, first.id)
 })
 
 const deployed = process.env.DEPLOYMENT_URL

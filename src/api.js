@@ -11,12 +11,12 @@ async function request(path, options = {}) {
   return data
 }
 
-const post = (path, body, keepalive = false) =>
+const post = (path, body, options) =>
   request(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-    keepalive,
+    ...options,
   })
 
 export const api = {
@@ -28,8 +28,9 @@ export const api = {
   start: (ids, language) => post('/operations', { indicators: ids, language }),
   current: () => request('/operations/current'),
   operation: (id) => request(`/operations/${id}`),
-  roundAction: ({ id, version }, action, fields) => post(`/operations/${id}/${action}`, { ...fields, version }),
-  activity: (id, report, keepalive) => post(`/operations/${id}/activity`, report, keepalive),
+  operationAction: ({ id, version }, action, fields, signal) =>
+    post(`/operations/${id}/${action}`, { ...fields, version }, { signal }),
+  activity: (id, report, keepalive) => post(`/operations/${id}/activity`, report, { keepalive }),
   adminOperations: (all) => request(`/admin/operations${all ? '?all=1' : ''}`),
   adminOperation: (id) => request(`/admin/operations/${id}`),
 }

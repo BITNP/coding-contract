@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { evaluate } from '../server/judge.js'
-import question from '../server/questions/max-subarray.js'
+import question from '../server/questions/max-rise.js'
+import solutions from '../server/questions/max-rise-solutions.js'
 import { checksFor, contractById } from '../shared/contracts.js'
 import { checkContracts } from '../shared/checks.js'
 
@@ -55,7 +56,7 @@ test('同一运行峰值按预算单调判定，指标不改变沙箱硬上限',
     index = 0
     const result = await evaluate({
       language: 'cpp',
-      source: question.solutions.cpp,
+      source: solutions.cpp,
       indicators: ['ancient-3', id],
       question,
     })

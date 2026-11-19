@@ -1,7 +1,7 @@
 import { openDatabase, transaction } from '../server/database.js'
-import { conclude, createOperation, currentRound, expire } from '../server/operations.js'
+import { createOperation, finishOperation } from '../server/operations.js'
 import { questions } from '../server/questions/index.js'
-import { adjustContracts, contractById, pointsOf, pruneUnavailable } from '../shared/contracts.js'
+import { contractById, pointsOf, pruneUnavailable } from '../shared/contracts.js'
 import { templates } from '../shared/languages.js'
 
 const full = [
@@ -31,38 +31,35 @@ const heavy = [
 const medium = ['time-1', 'ancient-2', 'source-2', 'lines-1', 'brackets-1', 'senses-1']
 const light = ['ancient-1', 'source-1']
 
-// 每个字符代表一个回合：p 通过，a 放弃，x 超时，- 仍在作答。
 const finished = [
-  ['星野', 'cpp', [full, full, full], 'ppp'],
-  ['Aurora', 'cpp', [full, full, full], 'ppa'],
-  ['白鹭', 'python', [heavy, full, full], 'ppp'],
-  ['风间', 'java', [heavy, heavy, heavy], 'ppp'],
-  ['雾岛', 'rust', [medium, heavy, heavy], 'ppp'],
-  ['neko', 'cpp', [medium, medium, heavy], 'ppx'],
-  ['远山', 'go', [medium, medium, medium], 'pap'],
-  ['青柠', 'javascript', [light, medium, medium], 'ppp'],
-  ['阿尔法', 'kotlin', [medium, light, light], 'pax'],
-  ['北辰', 'c', [light, light, medium], 'ppa'],
-  ['Orbit', 'typescript', [light, light, light], 'ppp'],
-  ['小满', 'swift', [light, medium, medium], 'aap'],
-  ['無名氏', 'lua', [light, light], 'px'],
-  ['雨宫', 'csharp', [heavy, heavy, medium], 'app'],
+  ['星野', 'cpp', full],
+  ['Aurora', 'cpp', full],
+  ['白鹭', 'python', heavy],
+  ['风间', 'java', heavy],
+  ['雾岛', 'rust', medium],
+  ['neko', 'cpp', heavy],
+  ['远山', 'go', medium],
+  ['青柠', 'javascript', medium],
+  ['阿尔法', 'kotlin', light],
+  ['北辰', 'c', medium],
+  ['Orbit', 'typescript', light],
+  ['小满', 'swift', medium],
+  ['無名氏', 'lua', light, 'expired'],
+  ['雨宫', 'csharp', heavy, 'abandoned'],
 ]
 const running = [
-  ['林晚', 'cpp', [full, full], 'p-', [['fullscreen-exit'], ['hidden'], ['visible', 42000], ['paste', 380]]],
-  ['周以安', 'python', [medium], '-', [['blur'], ['focus', 3000]]],
-  ['Kestrel', 'java', [heavy, heavy], 'a-', []],
-  ['陈默言之', 'rust', [light, light, light], 'pp-', [['devtools']]],
-  ['Mira', 'cpp', [full], '-', [['hidden'], ['visible', 9000]]],
+  ['林晚', 'cpp', full, 'active', [['fullscreen-exit'], ['hidden'], ['visible', 42000], ['paste', 380]]],
+  ['周以安', 'python', medium, 'active', [['blur'], ['focus', 3000]]],
+  ['Kestrel', 'java', heavy, 'active'],
+  ['陈默言之', 'rust', light, 'active', [['devtools']]],
+  ['Mira', 'cpp', full, 'active', [['hidden'], ['visible', 9000]]],
 ]
 
 const minute = 60_000
 const now = Date.now()
 const iso = (ms) => new Date(ms).toISOString()
 
-function submission(round, at, passed) {
-  const { language, contracts } = round
-  const question = questions[round.question]
+function submission({ language, contracts }, question, at, passed) {
   const source = templates[language]
   const maxScore = pointsOf(contracts)
   const verdict = passed ? 'AC' : 'WA'
@@ -73,6 +70,7 @@ function submission(round, at, passed) {
     ...usage,
   }))
   return {
+    question: question.id,
     language,
     source,
     contracts,
@@ -104,56 +102,38 @@ function submission(round, at, passed) {
   }
 }
 
-function play(id, [name, language, selections, outcomes, events], start, seed) {
-  const indicators = pruneUnavailable(selections[0], language)
+function play(id, [name, language, selection, phase = 'passed', events = []], start, seed) {
   const operation = createOperation({
     id,
     language,
-    indicators,
+    indicators: pruneUnavailable(selection, language),
     user: { id, name, avatar: null },
     now: start,
   })
-  const timeBudget = Math.min(now, Date.parse(operation.deadline)) - start
-  let at = start
-  for (const [step, outcome] of [...outcomes].entries()) {
-    const round = currentRound(operation)
-    if (step > 0) {
-      round.contracts = adjustContracts(round.contracts, pruneUnavailable(selections[step], language))
-      operation.version++
-    }
-    if (round.phase === 'choosing' && outcome !== 'a' && outcome !== 'x') {
-      Object.assign(round, { question: round.choices[seed % round.choices.length], phase: 'active' })
-      operation.version++
-    }
-    if (outcome === '-') break
-    if (outcome === 'x') {
-      expire(operation)
-    } else {
-      at += Math.round((timeBudget / 4) * (0.55 + ((seed * 7 + step * 11) % 9) / 18))
-      if (outcome === 'p') round.submission = submission(round, at, true)
-      conclude(
-        operation,
-        { phase: outcome === 'p' ? 'passed' : 'abandoned', score: round.submission?.result.score ?? 0 },
-        iso(at),
-      )
-    }
+  const choices = Object.values(questions)
+  const question = choices[seed % choices.length]
+  const deadline = Date.parse(operation.deadline)
+  const at =
+    phase === 'active'
+      ? now - (seed === 2 ? 7 * minute : 3000)
+      : start + (deadline - start) * (0.4 + seed / 50)
+  if (phase === 'passed' || (phase === 'active' && seed % 2)) {
+    operation.submission = submission(operation, question, at, phase === 'passed')
     operation.version++
   }
-
-  if (events) {
-    at = now - (seed === 2 ? 7 * minute : 3000)
-    operation.events = events.map(([type, detail], index) => {
-      const at = now - (8 - index) * minute
-      return { type, at, receivedAt: at + 400, detail }
-    })
-    if (seed % 2) {
-      const round = currentRound(operation)
-      round.submission = submission(round, at - minute, false)
-      operation.version++
-    }
-  }
+  if (phase !== 'active')
+    finishOperation(
+      operation,
+      phase,
+      phase === 'expired' ? operation.deadline : iso(at),
+      operation.submission?.result.score,
+    )
   operation.seenAt = iso(at)
-  operation.live = { source: templates[language], language, at: operation.seenAt }
+  operation.live = { question: question.id, source: templates[language], language, at: operation.seenAt }
+  operation.events = events.map(([type, detail], index) => {
+    const at = now - (8 - index) * minute
+    return { type, at, receivedAt: at + 400, detail }
+  })
   return operation
 }
 

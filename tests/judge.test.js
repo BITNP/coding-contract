@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { evaluate } from '../server/judge.js'
+import solutions from '../server/questions/max-rise-solutions.js'
 import { questions } from '../server/questions/index.js'
 import { languages } from '../shared/languages.js'
 
 const integration = { skip: !process.env.JUDGE_INTEGRATION, timeout: 180_000 }
-const question = questions['max-subarray']
-const { cases, solutions } = question
+const question = questions['max-rise']
+const { cases } = question
 const submit = (language, source, indicators = []) => evaluate({ language, source, indicators, question })
 
 for (const language of languages) {
@@ -21,17 +22,7 @@ for (const language of languages) {
   })
 }
 
-const roundSolutions = {
-  'max-rise': `import sys
-values = map(int, sys.stdin.buffer.read().split())
-next(values)
-previous = next(values)
-best = length = 1
-for value in values:
-  length = length + 1 if value > previous else 1
-  best = max(best, length)
-  previous = value
-print(best)`,
+const otherSolutions = {
   maze: `from collections import deque
 height, width = map(int, input().split())
 grid = [input() for _ in range(height)]
@@ -58,16 +49,9 @@ for start, end in sorted(requests, key=lambda request: request[1]):
     count += 1
     available = end
 print(count)`,
-  'fee-trading': `import sys
-values = map(int, sys.stdin.buffer.read().split())
-_, fee = next(values), next(values)
-cash, hold = 0, -next(values)
-for price in values:
-  cash, hold = max(cash, hold + price - fee), max(hold, cash - price)
-print(cash)`,
 }
 
-for (const [id, source] of Object.entries(roundSolutions)) {
+for (const [id, source] of Object.entries(otherSolutions)) {
   test(`${questions[id].title}参考解通过所有正式数据`, integration, async () => {
     const question = questions[id]
     const result = await evaluate({ question, source, language: 'python', indicators: [] })
@@ -104,21 +88,19 @@ test('低等数学 I 检查 Python 整除及其复合赋值', integration, async
   })
   const check = result.checks.find(({ id }) => id === 'arithmetic-1')
   assert.equal(check.status, 'failed')
-  assert.deepEqual(check.messages.toSorted(), ['第 1 行：不允许使用运算符 //', '第 2 行：不允许使用运算符 //='])
+  assert.deepEqual(check.messages.toSorted(), [
+    '第 1 行：不允许使用运算符 //',
+    '第 2 行：不允许使用运算符 //=',
+  ])
 })
 
 test('Java 内部类和辅助类一同打包运行', integration, async () => {
-  const source = `import java.util.Scanner;
-public class Main {
-  static class Adder { long sum(long a, long b) { return a + Math.max(b, 0); } }
-  public static void main(String[] args) {
-    Scanner in = new Scanner(System.in);
-    int n = in.nextInt();
-    long s = 0, b = -1000000;
-    while (n-- > 0) { s = new Adder().sum(in.nextLong(), s); b = Math.max(b, s); }
-    System.out.println(b);
-  }
-}`
+  const source = solutions.java
+    .replace(
+      'public class Main {',
+      'public class Main { static class Run { static int next(int n) { return n + 1; } }',
+    )
+    .replace('length + 1', 'Run.next(length)')
   const result = await submit('java', source)
   assert.equal(result.verdict, 'AC', result.message)
 })
@@ -168,7 +150,7 @@ test('编译错误、类型错误、答案错误、运行错误、超时和输�
 test('C 保留命名、控制流、运算指标检查，宏展开中的运算也参与', integration, async () => {
   const source = solutions.c
     .replace('#include <stdio.h>', '#include <stdio.h>\n#define ADD(a, b) ((a) + (b))')
-    .replace('x + (s > 0 ? s : 0)', 'ADD(x, (s > 0 ? s : 0))')
+    .replace('length + 1', 'ADD(length, 1)')
   const result = await submit('c', source, ['ancient-3', 'shrink-3', 'linear-3', 'arithmetic-1'])
   assert.equal(result.verdict, 'AC', result.message)
   assert.equal(result.passed, false)
@@ -215,9 +197,20 @@ test('样例只运行一组，自动校验不编译运行，运行内存保持�
   assert.equal(result.checks.find((check) => check.id === 'memory-1').status, 'pending')
 })
 
-test('最大规模拒绝 C++ 优化编译后的平方区间枚举', integration, async () => {
-  const source =
-    '#include <cstdio>\nlong long a[200000];\nint main() {\n  int n; scanf("%d", &n);\n  for (int i = 0; i < n; i++) scanf("%lld", &a[i]);\n  long long b = -1000000;\n  for (int i = 0; i < n; i++) {\n    long long s = 0;\n    for (int j = i; j < n; j++) { s += a[j]; if (s > b) b = s; }\n  }\n  printf("%lld", b);\n}\n'
+test('最大规模拒绝重复扫描每个上升段起点的平方解', integration, async () => {
+  const source = `#include <cstdio>
+int a[200000];
+int main() {
+  int n, best = 1;
+  scanf("%d", &n);
+  for (int i = 0; i < n; i++) scanf("%d", &a[i]);
+  for (int i = 0; i < n; i++) {
+    int j = i + 1;
+    while (j < n && a[j] > a[j - 1]) j++;
+    if (j - i > best) best = j - i;
+  }
+  printf("%d", best);
+}`
   const result = await submit('cpp', source)
   assert.equal(result.verdict, 'TLE', JSON.stringify(result))
   assert.equal(result.passed, false)

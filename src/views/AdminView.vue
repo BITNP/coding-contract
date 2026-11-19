@@ -9,12 +9,14 @@ import {
   Clock3,
   Code2,
   EyeOff,
+  FileText,
   History,
   Hourglass,
   LayoutDashboard,
   LogIn,
   Minimize,
   Radar,
+  Flag,
   RotateCw,
   Send,
   ShieldAlert,
@@ -22,13 +24,12 @@ import {
   Trophy,
 } from 'lucide-vue-next'
 import { api } from '../api.js'
-import { contractById, levelNames, pointsOf, submitGraceMs } from '../../shared/contracts.js'
+import { pointsOf, submitGraceMs } from '../../shared/contracts.js'
 import { activityLabels, flaggedActivity, phaseLabels } from '../../shared/labels.js'
 import { languageById } from '../../shared/languages.js'
 import UiButton from '../components/UiButton.vue'
 import InfoPopover from '../components/InfoPopover.vue'
-import RoundPopover from '../components/RoundPopover.vue'
-import IndicatorPopover from '../components/IndicatorPopover.vue'
+import IndicatorStrip from '../components/IndicatorStrip.vue'
 
 const flagIcons = {
   'fullscreen-exit': Minimize,
@@ -92,18 +93,8 @@ function describe({ type, detail }) {
   return detail && (type === 'visible' || type === 'focus') ? `${label}（离开 ${seconds(detail)}）` : label
 }
 function decorate(item) {
-  const rounds = item.rounds.map((round, index) => ({
-    ...round,
-    index,
-    mark: levelNames[index],
-    items: round.contracts.map((id) => contractById[id]),
-    points: pointsOf(round.contracts),
-    current: index === item.current && item.running,
-  }))
   return {
     ...item,
-    rounds,
-    stage: rounds[item.current],
     left: remaining(item),
     alerts: flagKinds.filter((kind) => item.flags[kind.type] > 0),
     away: item.awayMs >= 1000,
@@ -126,7 +117,7 @@ const events = computed(() =>
 const code = computed(() => {
   const submission = detail.value?.submission
   if (codeView.value === 'submitted' && submission?.source != null)
-    return { source: submission.source, language: submission.language, at: submission.submittedAt }
+    return { ...submission, at: submission.submittedAt }
   return detail.value?.live
 })
 
@@ -229,26 +220,12 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <div class="stage">
-              <ol class="round-track">
-                <RoundPopover v-for="round in item.rounds" :key="round.index" :round="round">
-                  <li :class="[round.phase, { current: round.current }]">{{ round.mark }}</li>
-                </RoundPopover>
-              </ol>
-              <small>{{ item.stage.title || phaseLabels[item.stage.phase] }}</small>
+            <div class="stack">
+              <b>{{ item.question || '—' }}</b>
+              <small>{{ phaseLabels[item.phase] }}</small>
             </div>
 
-            <div class="contract-strip">
-              <IndicatorPopover
-                v-for="contract in item.stage.items"
-                :key="contract.id"
-                :item="contract"
-                placement="bottom"
-              >
-                <span class="contract-icon" :data-level="contract.level"><img :src="contract.icon" alt="" /></span>
-              </IndicatorPopover>
-              <small v-if="!item.stage.items.length">未选指标</small>
-            </div>
+            <IndicatorStrip :ids="item.contracts" />
 
             <InfoPopover title="异常行为" placement="bottom-end" :width="240">
               <template #trigger>
@@ -309,34 +286,19 @@ onBeforeUnmount(() => {
             <ul class="facts">
               <li><CalendarClock :size="15" />开始时间<b>{{ clock(Date.parse(view.createdAt)) }}</b></li>
               <li><Code2 :size="15" />语言<b>{{ languageName(view.language) }}</b></li>
-              <li><Trophy :size="15" />累计得分<b class="num">{{ view.score }}</b></li>
+              <li><FileText :size="15" />题目<b>{{ view.question || '—' }}</b></li>
+              <li><Flag :size="15" />状态<b>{{ phaseLabels[view.phase] }}</b></li>
+              <li><Trophy :size="15" />作战得分<b class="num">{{ view.score }}</b></li>
               <li :class="view.submission && (view.submission.verdict === 'AC' ? 'accepted' : 'hot')">
                 <Send :size="15" />最近提交<b>{{
                   view.submission
-                    ? `${view.submission.verdict} · ${view.submission.score}/${view.submission.maxScore}`
+                    ? `${view.submission.question} · ${view.submission.verdict}`
                     : '未提交'
                 }}</b>
               </li>
             </ul>
-            <h3>回合</h3>
-            <ol class="round-cards">
-              <li v-for="round in view.rounds" :key="round.index" :class="[round.phase, { current: round.current }]">
-                <span class="round-mark">{{ round.mark }}</span>
-                <b>{{ round.title || (round.phase === 'pending' ? '尚未开放' : '未选题') }}</b>
-                <small
-                  >{{ phaseLabels[round.phase] }}<template v-if="round.phase === 'passed'"> · +{{ round.score }}</template></small
-                >
-                <div class="contract-strip">
-                  <IndicatorPopover v-for="contract in round.items" :key="contract.id" :item="contract" placement="left">
-                    <span class="contract-icon" :data-level="contract.level"><img :src="contract.icon" alt="" /></span>
-                  </IndicatorPopover>
-                </div>
-                <span class="round-points"
-                  ><template v-if="round.items.length"
-                    ><span class="num">{{ round.points }}</span><img src="/assets/risk-level.webp" alt="指标总计" /></template
-                ></span>
-              </li>
-            </ol>
+            <h3>已选指标 · {{ pointsOf(view.contracts) }} 分</h3>
+            <IndicatorStrip :ids="view.contracts" placement="left" />
             <h3>异常行为</h3>
             <ul class="facts">
               <li v-for="kind in flagKinds" :key="kind.type" :class="{ hot: view.flags[kind.type] > 0 }">
@@ -368,7 +330,7 @@ onBeforeUnmount(() => {
               >
                 提交代码
               </button>
-              <small v-if="code">{{ languageName(code.language) }} · {{ ago(code.at) }}</small>
+              <small v-if="code">{{ code.question }} · {{ languageName(code.language) }} · {{ ago(code.at) }}</small>
             </div>
             <pre v-if="code">{{ code.source }}</pre>
             <NSpin v-else-if="!detail.events" size="small" />
@@ -382,6 +344,9 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+:global(.app-shell:has(.admin-view)) {
+  min-width: 0;
+}
 .admin-view {
   padding-top: var(--space-4);
   user-select: text;
@@ -581,104 +546,8 @@ onBeforeUnmount(() => {
   color: var(--text);
 }
 
-.stage {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  min-width: 0;
-}
-.stage small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  color: var(--soft);
-}
-.round-track {
-  display: flex;
-  gap: 3px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.round-track li,
-.round-mark {
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 22px;
-  clip-path: polygon(22% 0, 78% 0, 100% 50%, 78% 100%, 22% 100%, 0 50%);
-  background: #ffffff14;
-  font: 400 13px/1 var(--font-num);
-  color: var(--muted);
-}
-.round-track .passed,
-.round-cards .passed .round-mark {
-  background: #b9cf8a33;
-  color: var(--green);
-}
-.round-track .abandoned,
-.round-cards .abandoned .round-mark {
-  color: #5d5e60;
-}
-.round-track .current,
-.round-cards .current .round-mark {
-  background: var(--red);
-  color: #fff;
-}
-.contract-strip {
-  min-width: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-.contract-strip small {
-  font-size: 12px;
-  color: var(--muted);
-}
-.contract-icon {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-bottom: 2px solid #ffab34;
-  background: #121314;
-  cursor: help;
-  transition: filter 0.12s;
-}
-.contract-icon[data-level='2'] {
-  border-color: #b664f5;
-}
-.contract-icon[data-level='3'] {
-  border-color: #f4486d;
-}
-.contract-icon:hover {
-  filter: brightness(1.3);
-}
-.contract-icon img {
-  width: 20px;
-  height: 20px;
-}
-
-.op-card .contract-strip {
-  display: grid;
-  grid-template-rows: repeat(2, 24px);
-  grid-auto-flow: column;
-  grid-auto-columns: 24px;
-  align-content: center;
-}
-.op-card .contract-strip small {
-  grid-row: 1 / -1;
-  align-self: center;
-  white-space: nowrap;
-}
-.op-card .contract-icon {
-  width: 24px;
-  height: 24px;
-}
-.op-card .contract-icon img {
-  width: 17px;
-  height: 17px;
+.op-card .indicator-strip {
+  --indicator-size: 24px;
 }
 .alerts {
   display: grid;
@@ -756,8 +625,7 @@ onBeforeUnmount(() => {
   line-height: 1;
   color: var(--text);
 }
-.score strong img,
-.round-points img {
+.score strong img {
   width: 15px;
   height: 16px;
   opacity: 0.8;
@@ -890,55 +758,6 @@ onBeforeUnmount(() => {
 .facts .hot b {
   color: #ff6f86;
 }
-.round-cards {
-  display: grid;
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.round-cards li {
-  display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr) auto 44px;
-  align-items: center;
-  gap: 10px;
-  height: 42px;
-  padding: 0 12px 0 8px;
-  background: linear-gradient(90deg, #ffffff0a, #ffffff03);
-}
-.round-cards li.pending {
-  opacity: 0.5;
-}
-.round-cards b {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text);
-  white-space: nowrap;
-}
-.round-cards small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  color: var(--muted);
-}
-.round-cards .contract-strip {
-  flex-wrap: nowrap;
-  justify-content: flex-end;
-}
-.round-cards .contract-icon {
-  width: 26px;
-  height: 26px;
-}
-.round-points {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 3px;
-  font-size: 20px;
-  color: var(--soft);
-}
-
 .timeline,
 .code {
   flex: 1;
@@ -1024,6 +843,41 @@ onBeforeUnmount(() => {
 @media (max-width: 1280px) {
   .op-list {
     column-gap: 14px;
+  }
+}
+@media (max-width: 1000px) {
+  .admin-layout {
+    height: auto;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .op-list {
+    max-height: 50dvh;
+  }
+  .detail-panel {
+    min-height: 24rem;
+  }
+}
+@media (max-width: 640px) {
+  .op-list {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 6px 10px;
+  }
+  .op-card {
+    row-gap: 6px;
+  }
+  .op-card .indicator-strip {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .op-card .score {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .panel-heading, .heading-meta {
+    flex-wrap: wrap;
+  }
+  .facts {
+    grid-template-columns: 1fr;
   }
 }
 </style>

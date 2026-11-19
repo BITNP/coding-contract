@@ -1,11 +1,12 @@
 import { languages } from '../shared/languages.js'
 import { evaluate } from './judge.js'
-import question from './questions/max-subarray.js'
+import question from './questions/max-rise.js'
+import solutions from './questions/max-rise-solutions.js'
 
 for (const { id, name } of languages) {
   const result = await evaluate({
     language: id,
-    source: question.solutions[id],
+    source: solutions[id],
     indicators: [],
     question,
     mode: 'sample',

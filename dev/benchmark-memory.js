@@ -1,5 +1,6 @@
 import { evaluate } from '../server/judge.js'
-import question from '../server/questions/max-subarray.js'
+import question from '../server/questions/max-rise.js'
+import solutions from '../server/questions/max-rise-solutions.js'
 import { languages } from '../shared/languages.js'
 import { checksFor } from '../shared/contracts.js'
 
@@ -11,7 +12,7 @@ const results = []
 for (const { id, name } of languages) {
   const peaks = []
   for (let round = 0; round < 3; round++) {
-    const result = await evaluate({ language: id, source: question.solutions[id], indicators: [], question })
+    const result = await evaluate({ language: id, source: solutions[id], indicators: [], question })
     if (result.verdict !== 'AC') throw new Error(`${name}: ${result.verdict} ${result.message}`)
     peaks.push(result.memoryBytes)
   }

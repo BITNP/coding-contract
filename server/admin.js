@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { flaggedActivity } from '../shared/labels.js'
-import { currentRound, roundSummary } from './operations.js'
+import { questions } from './questions/index.js'
 
 const window24h = 24 * 60 * 60 * 1000
 
@@ -40,10 +40,11 @@ export function createAdminRouter({ db, auth, admins = process.env.ADMIN_USERS }
   })
 
   function summarize(operation, now, detail = false) {
-    const { events } = operation
+    const { events, submission, live } = operation
     const flags = Object.fromEntries(flaggedActivity.map((type) => [type, 0]))
     for (const event of events) if (Object.hasOwn(flags, event.type)) flags[event.type]++
-    const submission = operation.rounds.findLast((round) => round.submission)?.submission
+    const current =
+      !submission || (operation.phase !== 'passed' && live?.at > submission.submittedAt) ? live : submission
     return {
       id: operation.id,
       user: operation.user,
@@ -52,12 +53,14 @@ export function createAdminRouter({ db, auth, admins = process.env.ADMIN_USERS }
       seenAt: operation.seenAt,
       online: now - Date.parse(operation.seenAt) < 60_000,
       running: !operation.finishedAt,
-      current: operation.current,
-      rounds: roundSummary(operation),
-      language: currentRound(operation).language,
-      score: operation.total,
+      phase: operation.phase,
+      question: current ? questions[current.question].title : null,
+      contracts: operation.contracts,
+      language: operation.language,
+      score: operation.score,
       submission: submission
         ? {
+            question: questions[submission.question].title,
             verdict: submission.result.verdict,
             score: submission.result.score,
             maxScore: submission.result.maxScore,
@@ -68,7 +71,7 @@ export function createAdminRouter({ db, auth, admins = process.env.ADMIN_USERS }
         : null,
       flags,
       awayMs: awayMs(events),
-      ...(detail && { events, live: operation.live }),
+      ...(detail && { events, live: live && { ...live, question: questions[live.question].title } }),
     }
   }
 

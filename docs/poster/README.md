@@ -67,12 +67,11 @@ typst watch contract.typ                             # 边改边预览（生成 
 
 默认排成居中的一行（最多 4 个）。多于 4 个时写 `columns: 4` 排成网格，`more: true` 在末尾加 `›››`。
 
-### 回合卡
+### 选题卡
 
 ```typst
-#rounds(
-  round-card("I", [先遣], title: [最长升温])[说明文字],
-  round-card("II", [三选一])[不写 title，题目显示为涂黑的格子],
+#choices(
+  choice-card("A", [顺序扫描], [最长升温])[说明文字],
 )
 ```
 

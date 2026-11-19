@@ -14,8 +14,6 @@ export const activityLabels = {
 export const flaggedActivity = ['fullscreen-exit', 'hidden', 'blur', 'paste', 'devtools']
 
 export const phaseLabels = {
-  pending: '未开始',
-  choosing: '选题中',
   active: '作答中',
   passed: '已通过',
   abandoned: '已放弃',

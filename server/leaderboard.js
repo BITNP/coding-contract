@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { languageById } from '../shared/languages.js'
-import { roundSummary, currentRound } from './operations.js'
+import { questions } from './questions/index.js'
 
 export const rankingOrder = 'score DESC, duration_ms, finished_at, id'
 
@@ -24,11 +24,12 @@ export function leaderboard(db) {
           rank: index + 1,
           name,
           avatar,
-          score: operation.total,
-          language: languageById[currentRound(operation).language].name,
+          score: operation.score,
+          language: languageById[operation.language].name,
           durationMs: duration_ms,
           updatedAt: operation.finishedAt,
-          rounds: roundSummary(operation),
+          question: questions[operation.submission.question].title,
+          contracts: operation.contracts,
         }
       }),
     ),

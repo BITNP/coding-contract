@@ -10,7 +10,7 @@
 //   - 列表项                  红色小旗项目符号
 //   *重点*                    红字强调
 //
-// 其余组件（图标格、回合卡、语言标签等）见本文件「组件」部分。
+// 其余组件（图标格、选题卡、语言标签等）见本文件「组件」部分。
 // 页面宽 600pt，字号按手机竖屏浏览设定（与「赤石奖」长图相当），一般不必再调。
 // =============================================================================
 
@@ -384,15 +384,13 @@
   })
 }
 
-// 回合卡（横向一行一张）。不写 title 时题目显示为涂黑的格子（未解锁）。
-//   #round-card("I", [先遣], title: [最长升温])[说明文字]
-#let round-card(numeral, label, title: none, hidden-chars: 4, body) = block(
+#let choice-card(letter, label, title, body) = block(
   fill: rgb("121213"),
   stroke: (left: 4pt + primary, rest: 0.8pt + rgb("3a3a3a")),
   inset: (x: 16pt, y: 14pt),
   {
     place(right + horizon, dx: 4pt, ghost-word(
-      numeral,
+      letter,
       size: 80pt,
       tracking: 0.04em,
       rgb("ffffff07"),
@@ -403,28 +401,18 @@
       column-gutter: 14pt,
       align: (left + horizon, left + horizon),
       {
-        text(size: size-tiny, fill: hot-red, font: mono-font, tracking: 2pt)[ROUND #numeral]
+        text(size: size-tiny, fill: hot-red, font: mono-font, tracking: 2pt)[OPTION #letter]
         h(6pt)
         text(size: size-small, fill: muted, label)
         v(-4pt)
-        if title == none {
-          stack(dir: ltr, spacing: 4pt, ..range(hidden-chars).map(_ => rect(
-            width: 28pt,
-            height: 30pt,
-            fill: rgb("2c2c2d"),
-            stroke: 0.8pt + rgb("4a4a4a"),
-          )))
-        } else {
-          text(size: 30pt, weight: "black", title)
-        }
+        text(size: 30pt, weight: "black", title)
       },
       text(size: size-small + 1pt, fill: rgb("c4c4c4"), body),
     )
   },
 )
 
-// 把若干回合卡竖向排列。
-#let rounds(..cards) = block(above: 20pt, below: 20pt, stack(spacing: 10pt, ..cards.pos()))
+#let choices(..cards) = block(above: 20pt, below: 20pt, stack(spacing: 10pt, ..cards.pos()))
 
 // 等宽字小标签，适合语言、标签列表：#chips("C++17", "Python 3")
 #let chips(..names) = {

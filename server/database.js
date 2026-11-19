@@ -6,7 +6,7 @@ export function openDatabase(
   path = process.env.DATA_DIR || fileURLToPath(new URL('./data/', import.meta.url)),
 ) {
   mkdirSync(path, { recursive: true })
-  const db = new DatabaseSync(`${path}/operations.sqlite`)
+  const db = new DatabaseSync(`${path}/contest.sqlite`)
   db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA busy_timeout = 5000;
@@ -15,7 +15,7 @@ export function openDatabase(
       created_at TEXT AS (data ->> '$.createdAt'),
       deadline TEXT AS (data ->> '$.deadline'),
       finished_at TEXT AS (data ->> '$.finishedAt'),
-      score INTEGER AS (data ->> '$.total'),
+      score INTEGER AS (data ->> '$.score'),
       duration_ms INTEGER AS (round((julianday(finished_at) - julianday(created_at)) * 86400000))
     );
     CREATE UNIQUE INDEX IF NOT EXISTS active_user ON operations(user_id) WHERE finished_at IS NULL;

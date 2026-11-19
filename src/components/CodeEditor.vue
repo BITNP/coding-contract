@@ -182,7 +182,7 @@ import { sourceFacts } from '../sourceFacts.js'
 import { attachLanguageService, detachLanguageService } from '../lsp/index.js'
 
 const props = defineProps({
-  modelValue: String, language: String, disabled: String, masked: { type: Number, default: 0 }, marks: { type: Array, default: () => [] },
+  modelValue: String, question: String, language: String, disabled: String, masked: { type: Number, default: 0 }, marks: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['update:modelValue', 'run', 'save', 'cursor'])
 const element = ref(null)
@@ -261,8 +261,8 @@ function createModel(language, value) {
   const { editor: mode, filename } = languageById[language]
   return monaco.editor.createModel(value, (props.masked && basicModes[mode]) || mode, monaco.Uri.file(`/workspace/${filename}`))
 }
-watch(() => props.modelValue, value => {
-  if (editor && value !== editor.getValue()) editor.setValue(value)
+watch([() => props.modelValue, () => props.question], ([value, question], [, previous]) => {
+  if (editor && (question !== previous || value !== editor.getValue())) editor.setValue(value)
 })
 watch(() => props.language, (language) => {
   if (!editor) return

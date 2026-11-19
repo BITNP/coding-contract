@@ -1,4 +1,4 @@
-import { defineQuestion, random, sequenceCases } from './data.js'
+import { defineQuestion, random } from './data.js'
 
 // 题型参考：洛谷 P1567，题面、范围和评测数据独立编写。
 const question = {
@@ -52,7 +52,7 @@ function longestRise(values) {
 const rng = random(0x51a7)
 const rising = (length, start, step = 1) => Array.from({ length }, (_, i) => start + i * step)
 
-export default defineQuestion(question, () => sequenceCases([
+export default defineQuestion(question, () => [
   [2, 3, 3, 4, 5, 6, 1, 2, 3],
   [7],
   [-1000000000],
@@ -70,4 +70,8 @@ export default defineQuestion(question, () => sequenceCases([
   [...rng.ints(150000, -1000000000, 1000000000), ...rising(50000, -1000000000, 40000)],
   ...Array.from({ length: 12 }, (_, i) => rng.ints(i * 6 + 2, -3, 3)),
   rng.ints(200000, -1000000000, 1000000000),
-], longestRise))
+].map((values, index, sequences) => {
+  const row = values.join(' ')
+  const input = index === sequences.length - 1 ? row.replace(' ', '\n') : row
+  return { input: `${values.length}\n${input}\n`, answer: String(longestRise(values)) }
+}))

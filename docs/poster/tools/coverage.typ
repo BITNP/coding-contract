@@ -32,7 +32,6 @@
     (icon: "assets/indicators/time-2.webp", selected: true, scale: 40%),
   )
   #tiles(columns: 3, size: 60pt, gap: 10pt, (image("../assets/indicators/time-3.webp"), [名称]))
-  #rounds(round-card("IV", [标签], hidden-chars: 2)[说明])
   #chips("A", "B")
   #notice[注意]
 ]

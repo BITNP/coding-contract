@@ -4,8 +4,7 @@ import { Clock3, Code2, Trophy } from 'lucide-vue-next'
 import { api } from '../api'
 import Halftone from '../components/Halftone.vue'
 import Digits from '../components/Digits.vue'
-import RoundPopover from '../components/RoundPopover.vue'
-import { contractById, levelNames } from '../../shared/contracts.js'
+import IndicatorStrip from '../components/IndicatorStrip.vue'
 
 const interval = 12_000
 const perPage = 10
@@ -38,12 +37,7 @@ async function load() {
     entries.value = (await api.leaderboard()).map((entry) => {
       const id = `${entry.name}\n${entry.avatar}`
       seen[id] = (seen[id] || 0) + 1
-      const rounds = entry.rounds.map((round, index) => ({
-        ...round,
-        mark: levelNames[index],
-        items: round.contracts.map((contract) => contractById[contract]),
-      }))
-      return { ...entry, rounds, key: `${id}\n${seen[id]}` }
+      return { ...entry, key: `${id}\n${seen[id]}` }
     })
     syncedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
     status.value = 'live'
@@ -117,8 +111,9 @@ const toggleFullscreen = () =>
               <span><Code2 />{{ entry.language }}</span>
               <span><Clock3 /><b>{{ clock(entry.durationMs) }}</b></span>
             </p>
-            <div class="round-lines">
-              <RoundPopover v-for="round in entry.rounds" :key="round.mark" :round="round" />
+            <div class="entry-question">
+              <span>{{ entry.question }}</span>
+              <IndicatorStrip :ids="entry.contracts" />
             </div>
             <span class="score"
               ><strong class="num">{{ entry.score }}</strong><img src="/assets/risk-level.webp" alt=""
@@ -151,8 +146,9 @@ const toggleFullscreen = () =>
                 <h3>{{ entry.name }}</h3>
                 <p><Code2 />{{ entry.language }}<i /><Clock3 />{{ clock(entry.durationMs) }}</p>
               </div>
-              <div class="round-lines">
-                <RoundPopover v-for="round in entry.rounds" :key="round.mark" :round="round" />
+              <div class="entry-question">
+                <span>{{ entry.question }}</span>
+                <IndicatorStrip :ids="entry.contracts" />
               </div>
               <span class="score"
                 ><strong class="num">{{ entry.score }}</strong><img src="/assets/risk-level.webp" alt=""
@@ -181,6 +177,9 @@ const toggleFullscreen = () =>
 </template>
 
 <style scoped>
+:global(.app-shell:has(.leaderboard)) {
+  min-width: 0;
+}
 .leaderboard {
   position: relative;
   z-index: 1;
@@ -335,7 +334,7 @@ const toggleFullscreen = () =>
   grid-template:
     'avatar name score' auto
     'avatar meta score' auto
-    'rounds rounds rounds' auto / auto minmax(0, 1fr) auto;
+    'question question question' auto / auto minmax(0, 1fr) auto;
   align-content: center;
   column-gap: calc(2.4vmin * var(--s));
   padding: 2.4vmin 3vmin 2vmin;
@@ -547,19 +546,22 @@ h3 {
   margin: 0 1vmin;
   background: #ffffff26;
 }
-.round-lines {
-  --line: 1.8vmin;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  column-gap: 1vmin;
-  row-gap: 0.2vmin;
-  align-content: center;
+.entry-question {
+  --indicator-size: 2.3vmin;
+  display: flex;
+  align-items: center;
+  gap: 1vmin;
+  font-size: 1.8vmin;
+  color: var(--soft);
 }
-.podium-card .round-lines {
-  --line: calc(2.2vmin * var(--s));
-  grid-area: rounds;
-  row-gap: 0.6vmin;
+.entry-question > span {
+  flex: none;
+}
+.podium-card .entry-question {
+  --indicator-size: calc(3.2vmin * var(--s));
+  grid-area: question;
   margin-top: 1.8vmin;
+  font-size: calc(2.4vmin * var(--s));
 }
 .row .score {
   align-self: stretch;
@@ -667,6 +669,38 @@ h3 {
 }
 .board-page-leave-to {
   opacity: 0;
+}
+
+@media (max-width: 800px) {
+  .leaderboard {
+    height: auto;
+    min-height: calc(100dvh - var(--page-bottom));
+  }
+  .board-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .podium-card {
+    min-height: 110px;
+  }
+  .row {
+    min-height: 54px;
+  }
+  .rows {
+    grid-template-rows: none;
+  }
+  .podium-card h2, .row-copy h3 {
+    font-size: 16px;
+  }
+  .podium-meta, .podium-meta b, .row-copy p, .entry-question, .podium-card .entry-question {
+    font-size: 12px;
+  }
+  .entry-question {
+    --indicator-size: 16px;
+    flex-wrap: wrap;
+  }
+  .podium-card .entry-question {
+    --indicator-size: 18px;
+  }
 }
 
 @keyframes pulse {

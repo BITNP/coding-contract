@@ -8,7 +8,7 @@ import { leaderboard, rankingOrder } from './leaderboard.js'
 import { questions } from './questions/index.js'
 import { evaluate } from './judge.js'
 import { openDatabase, transaction } from './database.js'
-import { closed, conclude, createOperation, currentRound, operationView, expire } from './operations.js'
+import { createOperation, finishOperation, operationView } from './operations.js'
 import { adjustContracts, selectionErrors, submitGraceMs } from '../shared/contracts.js'
 import { activityLabels } from '../shared/labels.js'
 import { languageById } from '../shared/languages.js'
@@ -54,8 +54,7 @@ const statements = {
   insert: db.prepare('INSERT INTO operations (id, user_id, data) VALUES (?, ?, ?)'),
   find: db.prepare('SELECT data FROM operations WHERE id = ? AND user_id = ?'),
   active: db.prepare('SELECT id FROM operations WHERE user_id = ? AND finished_at IS NULL'),
-  due: db.prepare(`SELECT data FROM operations WHERE finished_at IS NULL AND deadline < ?
-    AND (deadline < ? OR json_extract(data, '$.rounds[' || (data ->> '$.current') || '].phase') = 'choosing')`),
+  due: db.prepare('SELECT data FROM operations WHERE finished_at IS NULL AND deadline < ?'),
   update: db.prepare('UPDATE operations SET data = ? WHERE id = ?'),
 }
 const judging = new Map()
@@ -74,14 +73,13 @@ function save(operation) {
 }
 
 function settleExpired() {
-  const now = Date.now()
-  const deadlines = [new Date(now).toISOString(), new Date(now - submitGraceMs).toISOString()]
-  if (!statements.due.get(...deadlines)) return
+  const cutoff = new Date(Date.now() - submitGraceMs).toISOString()
+  if (!statements.due.get(cutoff)) return
   transaction(db, () => {
-    for (const { data } of statements.due.all(...deadlines)) {
+    for (const { data } of statements.due.all(cutoff)) {
       const operation = JSON.parse(data)
       if (judging.get(operation.id) === operation.version) continue
-      expire(operation)
+      finishOperation(operation, 'expired', operation.deadline)
       operation.version++
       save(operation)
     }
@@ -159,6 +157,10 @@ function updateOperation(req, change) {
   })
 }
 
+function validQuestion(id) {
+  return typeof id === 'string' && Object.hasOwn(questions, id)
+}
+
 function validEvent(event) {
   return (
     typeof event?.type === 'string' &&
@@ -176,6 +178,7 @@ app.post('/api/operations/:id/activity', (req, res) => {
   if (
     snapshot !== undefined &&
     (typeof snapshot?.source !== 'string' ||
+      !validQuestion(snapshot.question) ||
       typeof snapshot.language !== 'string' ||
       !Object.hasOwn(languageById, snapshot.language))
   )
@@ -187,6 +190,7 @@ app.post('/api/operations/:id/activity', (req, res) => {
     operation.seenAt = new Date(now).toISOString()
     if (snapshot)
       operation.live = {
+        question: snapshot.question,
         language: snapshot.language,
         source: snapshot.source.slice(0, 65536),
         at: operation.seenAt,
@@ -195,20 +199,17 @@ app.post('/api/operations/:id/activity', (req, res) => {
   res.json({ accepted: accepted.length })
 })
 
-function checkRound(operation, version, phases, grace = 0, now = Date.now()) {
+function checkActive(operation, version, grace = 0, now = Date.now()) {
   if (!Number.isSafeInteger(version) || version < 0) throw fail(400, '缺少有效的作战版本')
-  if (operation.version !== version) throw fail(409, '回合状态已变化，请刷新页面')
-  if (closed(operation, grace, now)) throw fail(403, '作战已结束')
-  const round = currentRound(operation)
-  if (!phases.includes(round.phase)) throw fail(409, '当前回合无法执行此操作')
-  return round
+  if (operation.version !== version) throw fail(409, '作战状态已变化，请刷新页面')
+  if (operation.finishedAt || now > Date.parse(operation.deadline) + grace) throw fail(403, '作战已结束')
 }
 
-function roundAction(phases, act) {
+function action(change) {
   return (req, res) => {
     const operation = updateOperation(req, (operation) => {
-      const round = checkRound(operation, req.body.version, phases)
-      act(operation, round, req.body)
+      checkActive(operation, req.body.version)
+      change(operation, req.body)
       operation.version++
     })
     res.json(operationView(operation))
@@ -216,36 +217,29 @@ function roundAction(phases, act) {
 }
 
 app.post(
-  '/api/operations/:id/choose',
-  roundAction(['choosing'], (_operation, round, { question }) => {
-    if (!round.choices.includes(question)) throw fail(400, '该题目不在本回合的可选范围内')
-    Object.assign(round, { question, phase: 'active' })
-  }),
-)
-
-app.post(
   '/api/operations/:id/contracts',
-  roundAction(['choosing', 'active'], (_operation, round, { indicators, language }) => {
+  action((operation, { indicators, language }) => {
     checkSelection(indicators, language)
-    Object.assign(round, { contracts: adjustContracts(round.contracts, indicators), language })
+    operation.contracts = adjustContracts(operation.contracts, indicators)
+    operation.language = language
   }),
 )
 
 app.post(
   '/api/operations/:id/abandon',
-  roundAction(['choosing', 'active'], (operation) => {
-    conclude(operation, { phase: 'abandoned', score: 0 }, new Date().toISOString())
-  }),
+  action((operation) => finishOperation(operation, 'abandoned', new Date().toISOString())),
 )
 
 for (const mode of ['validate', 'sample', 'submit']) {
   app.post(`/api/operations/:id/${mode}`, async (req, res) => {
-    const { version, source } = req.body
+    const { version, source, question } = req.body
     const received = Date.now()
     const operation = findOperation(req.params.id, user(req).id)
     const submitted = mode === 'submit'
     const grace = submitted ? submitGraceMs : 0
-    const { contracts, language, question } = checkRound(operation, version, ['active'], grace, received)
+    checkActive(operation, version, grace, received)
+    if (!validQuestion(question)) throw fail(400, '请选择本场作战中的题目')
+    const { contracts, language } = operation
     if (submitted && judging.get(operation.id) === version) throw fail(409, '提交正在评测')
     if (submitted) judging.set(operation.id, version)
     try {
@@ -257,15 +251,16 @@ for (const mode of ['validate', 'sample', 'submit']) {
         mode,
       })
       if (!submitted) {
-        checkRound(findOperation(req.params.id, user(req).id), version, ['active'], 0, received)
+        checkActive(findOperation(req.params.id, user(req).id), version, 0, received)
         return res.json(result)
       }
       const latest = updateOperation(req, (latest) => {
-        const round = checkRound(latest, version, ['active'], grace, received)
+        checkActive(latest, version, grace, received)
         const submittedAt = new Date(received).toISOString()
-        round.submission = { source, language, contracts, result, submittedAt }
-        if (result.passed) conclude(latest, { phase: 'passed', score: result.score }, submittedAt, Date.now())
-        else if (Date.now() >= Date.parse(latest.deadline)) expire(latest)
+        latest.submission = { question, source, language, contracts, result, submittedAt }
+        if (result.passed) finishOperation(latest, 'passed', submittedAt, result.score)
+        else if (Date.now() >= Date.parse(latest.deadline))
+          finishOperation(latest, 'expired', latest.deadline)
         latest.version++
       })
       res.json(operationView(latest))
