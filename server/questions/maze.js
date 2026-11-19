@@ -3,7 +3,6 @@ import { defineQuestion, random } from './data.js'
 const question = {
   id: 'maze',
   title: '迷宫寻路',
-  category: '搜索 / 广度优先搜索',
   content: String.raw`## 题目描述
 
 侦察队需要从起点 \`S\` 抵达撤离点 \`E\`。区域地图是一个 $r$ 行 $c$ 列的网格：\`.\` 表示可以通行，\`#\` 表示障碍，\`S\` 和 \`E\` 所在格子也可以通行。

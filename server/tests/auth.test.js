@@ -257,14 +257,13 @@ test('登录返回地址不能跳到外部站点', async (t) => {
   }
 })
 
-test('实际 API 启用 OIDC 后，未登录无法创建、读取、校验或提交作战记录', async (t) => {
+test('实际 API 启用 OIDC 后，未登录无法创建、读取作战记录或评测代码', async (t) => {
   const { base } = await startApi(t, oidcEnv)
   assert.deepEqual(await (await fetch(`${base}/api/session`)).json(), { user: null, authAvailable: true })
   for (const [path, method] of [
     ['/api/records/best', 'GET'],
     ['/api/operations', 'POST'],
     ['/api/operations/known-id', 'GET'],
-    ['/api/operations/known-id/validate', 'POST'],
     ['/api/operations/known-id/sample', 'POST'],
     ['/api/operations/known-id/submit', 'POST'],
   ]) {

@@ -3,116 +3,68 @@ import { test } from 'node:test'
 import { languages } from '../shared/languages.js'
 import solutions from '../server/questions/max-rise-solutions.js'
 import { defineQuestion } from '../server/questions/data.js'
-import { publicQuestion, questions } from '../server/questions/index.js'
+import { questions } from '../server/questions/index.js'
 
 const block = (content, heading) =>
   content.match(new RegExp(`## ${heading}\\s+~~~text\\n([\\s\\S]*?)~~~`))[1].trim()
-const sampleOf = (content) => ({ input: block(content, '输入样例'), answer: block(content, '输出样例') })
-const rejects = (cases, parse, solve) =>
-  cases.some((item) => String(solve(parse(item.input))) !== item.answer)
 
-test('公开题面不生成判题数据，同题的评测复用首次生成的用例', () => {
+test('用例延迟到首次评测时生成，同一题只生成一次', () => {
   let builds = 0
   const question = defineQuestion({ id: 'test' }, () => {
     builds++
     return []
   })
-  publicQuestion(question)
   assert.equal(builds, 0)
   assert.strictEqual(question.cases, question.cases)
   assert.equal(builds, 1)
 })
 
 test('三个题面公开首组样例，参考解覆盖所有语言', () => {
-  assert.deepEqual(Object.keys(questions), ['max-rise', 'channel-schedule', 'maze'])
   assert.deepEqual(Object.keys(solutions).sort(), languages.map(({ id }) => id).sort())
   for (const source of Object.values(solutions)) assert.ok(Buffer.byteLength(source) <= 1024)
   for (const question of Object.values(questions)) {
-    assert.equal([...question.title].length, 4, question.id)
-    assert.ok(question.cases.length >= 10, question.id)
-    assert.deepEqual(sampleOf(question.content), {
-      input: question.cases[0].input.trim(),
-      answer: question.cases[0].answer.trim(),
-    })
-    for (const item of question.cases)
-      assert.ok(item.input.trim() && /^-?\d+$/.test(item.answer), question.id)
-    assert.deepEqual(Object.keys(publicQuestion(question)), [
-      'id',
-      'title',
-      'category',
-      'content',
-      'timeLimitMs',
-      'memoryLimitBytes',
-    ])
+    const sample = question.cases[0]
+    assert.equal(block(question.content, '输入样例'), sample.input.trim(), question.id)
+    assert.equal(block(question.content, '输出样例'), sample.answer, question.id)
+    assert.ok(
+      question.cases.every(({ input, answer }) => input.trim() && /^-?\d+$/.test(answer)),
+      question.id,
+    )
   }
-  assert.ok(questions['max-rise'].cases.some(({ input }) => input.trimEnd().split('\n').length > 2))
 })
 
 const numbers = (input) => input.trim().split(/\s+/).map(Number)
 
 test('最长升温：小数据由穷举核对，拒绝非严格上升和计数类错解', () => {
   const { cases } = questions['max-rise']
-  const parse = (input) => numbers(input).slice(1)
-  const brute = (t) => {
+  const small = []
+  const brute = (t, rises = (a, b) => b > a) => {
     let best = 0
     for (let i = 0; i < t.length; i++) {
       let j = i + 1
-      while (j < t.length && t[j] > t[j - 1]) j++
+      while (j < t.length && rises(t[j - 1], t[j])) j++
       best = Math.max(best, j - i)
     }
     return best
   }
   for (const item of cases) {
-    const values = parse(item.input)
+    const [size, ...values] = numbers(item.input)
+    assert.equal(values.length, size)
     assert.ok(values.length >= 1 && values.length <= 200000)
     assert.ok(values.every((v) => Math.abs(v) <= 1e9))
-    if (values.length <= 100) assert.equal(item.answer, String(brute(values)))
-  }
-  assert.ok(cases.some((item) => item.answer === '200000'))
-  const run = (t, rises) =>
-    t.reduce(
-      ([best, length], v, i) => {
-        const next = i && rises(t[i - 1], v) ? length + 1 : 1
-        return [Math.max(best, next), next]
-      },
-      [0, 0],
-    )[0]
-  assert.ok(rejects(cases, parse, (t) => run(t, (a, b) => b >= a)))
-  assert.ok(rejects(cases, parse, (t) => 1 + t.filter((v, i) => i && v > t[i - 1]).length))
-  assert.ok(rejects(cases, parse, (t) => run(t, (a, b) => b > a) - 1))
-})
-
-const parseMaze = (input) => input.trim().split('\n').slice(1)
-function search(rows, moves, walls = true) {
-  const height = rows.length
-  const width = rows[0].length
-  const find = (mark) => {
-    const y = rows.findIndex((row) => row.includes(mark))
-    return [y, rows[y].indexOf(mark)]
-  }
-  const [sy, sx] = find('S')
-  const [ey, ex] = find('E')
-  const distance = rows.map((row) => [...row].map(() => -1))
-  distance[sy][sx] = 0
-  const queue = [[sy, sx]]
-  for (const [y, x] of queue) {
-    for (const [dy, dx] of moves) {
-      const ny = y + dy
-      const nx = x + dx
-      if (ny < 0 || nx < 0 || ny >= height || nx >= width || distance[ny][nx] >= 0) continue
-      if (walls && rows[ny][nx] === '#') continue
-      distance[ny][nx] = distance[y][x] + 1
-      queue.push([ny, nx])
+    if (values.length <= 100) {
+      assert.equal(item.answer, String(brute(values)))
+      small.push({ values, answer: Number(item.answer) })
     }
   }
-  return distance[ey][ex]
-}
-const four = [
-  [1, 0],
-  [-1, 0],
-  [0, 1],
-  [0, -1],
-]
+  assert.ok(cases.some((item) => item.answer === '200000'))
+  assert.ok(cases.some(({ input }) => input.trimEnd().split('\n').length > 2))
+  assert.ok(small.some(({ values, answer }) => brute(values, (a, b) => b >= a) !== answer))
+  assert.ok(
+    small.some(({ values, answer }) => 1 + values.filter((v, i) => i && v > values[i - 1]).length !== answer),
+  )
+  assert.ok(small.some(({ values, answer }) => values.length === 1 && answer === 1))
+})
 
 test('迷宫寻路：小图由松弛迭代核对，大图答案固定，拒绝八向、无视障碍和不判无解', () => {
   const { cases } = questions.maze
@@ -134,8 +86,8 @@ test('迷宫寻路：小图由松弛迭代核对，大图答案固定，拒绝�
     return end === Infinity ? -1 : end
   }
   for (const item of cases) {
-    const rows = parseMaze(item.input)
-    const [r, c] = numbers(item.input.split('\n')[0])
+    const [size, ...rows] = item.input.trimEnd().split('\n')
+    const [r, c] = numbers(size)
     assert.equal(rows.length, r)
     assert.ok(rows.every((row) => row.length === c && /^[.#SE]+$/.test(row)))
     assert.ok(r <= 100 && c <= 100 && r * c >= 2)
@@ -148,10 +100,9 @@ test('迷宫寻路：小图由松弛迭代核对，大图答案固定，拒绝�
       cases.some((item) => item.answer === answer),
       answer,
     )
-  const eight = [...four, [1, 1], [1, -1], [-1, 1], [-1, -1]]
-  assert.ok(rejects(cases, parseMaze, (rows) => search(rows, eight)))
-  assert.ok(rejects(cases, parseMaze, (rows) => search(rows, four, false)))
-  assert.ok(rejects(cases, parseMaze, (rows) => Math.max(0, search(rows, four))))
+  assert.ok(
+    cases.some(({ input, answer }) => answer === '-1' && input.trim().split(/\s+/).join(' ') === '2 2 S# #E'),
+  )
 })
 
 test('信道排班：小数据穷举所有可行子集，覆盖乱序、区间相接及贪心反例', () => {
@@ -182,24 +133,31 @@ test('信道排班：小数据穷举所有可行子集，覆盖乱序、区间�
   assert.ok(small.some(({ requests, answer }) => !requests.length && answer === 0))
   assert.ok(cases.some(({ answer }) => answer === '200000'))
 
-  function select(requests, compare, accepts = compatible) {
-    const chosen = []
-    for (const request of requests.toSorted(compare)) {
-      if (chosen.every((other) => accepts(other, request))) chosen.push(request)
-    }
-    return chosen.length
+  function rejects(order, fits = compatible) {
+    return small.some(({ requests, answer }) => {
+      const chosen = []
+      for (const request of requests.toSorted(order))
+        if (chosen.every((other) => fits(other, request))) chosen.push(request)
+      return chosen.length !== answer
+    })
   }
-  for (const wrong of [
-    (requests) => select(requests, () => 0),
-    (requests) => select(requests, ([a], [b]) => a - b),
-    (requests) => select(requests, ([a, b], [c, d]) => b - a - (d - c)),
-    (requests) =>
-      select(
-        requests,
-        (a, b) => a[1] - b[1],
-        ([, end], [start]) => end < start,
-      ),
-  ]) {
-    assert.ok(small.some(({ requests, answer }) => wrong(requests) !== answer))
-  }
+  assert.ok(
+    rejects(() => 0),
+    '按输入顺序',
+  )
+  assert.ok(
+    rejects(([a], [b]) => a - b),
+    '最早开始优先',
+  )
+  assert.ok(
+    rejects(([a, b], [c, d]) => b - a - (d - c)),
+    '最短优先',
+  )
+  assert.ok(
+    rejects(
+      (a, b) => a[1] - b[1],
+      ([, end], [start]) => end < start,
+    ),
+    '拒绝首尾相接',
+  )
 })

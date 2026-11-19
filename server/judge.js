@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { pointsOf, selectionErrors } from '../shared/contracts.js'
+import { selectionErrors } from '../shared/contracts.js'
 import { checkContracts, memoryLimit } from '../shared/checks.js'
 import { languageById } from '../shared/languages.js'
 import { runtimes } from './runtimes.js'
@@ -51,7 +51,6 @@ export async function evaluate({ source, language, indicators, question, mode = 
   if (typeof source !== 'string' || !source.trim())
     throw Object.assign(new Error('请填写源码'), { status: 400 })
 
-  // selectionErrors 先校验白名单，禁止把语言 ID 当路径或命令使用。
   const { filename } = languageById[language]
   const runtime = runtimes[language]
   const copyIn = { [filename]: { content: source } }
@@ -62,15 +61,14 @@ export async function evaluate({ source, language, indicators, question, mode = 
   if (analyzed.status !== 'Accepted')
     throw new Error(analyzed.files?.stderr || analyzed.error || '源码分析未完成')
   const facts = JSON.parse(analyzed.files.stdout)
+  const inputs = mode === 'sample' ? question.cases.slice(0, 1) : question.cases
   const result = {
     mode,
     verdict: 'CE',
     passed: false,
-    score: 0,
-    maxScore: pointsOf(indicators),
     checks: [],
     cases: [],
-    totalCases: mode === 'sample' ? 1 : question.cases.length,
+    totalCases: inputs.length,
     timeMs: 0,
     memoryBytes: 0,
     sourceBytes: facts.bytes,
@@ -78,12 +76,6 @@ export async function evaluate({ source, language, indicators, question, mode = 
     message: facts.error || '',
   }
   if (facts.error) return result
-  result.checks = checkContracts(indicators, facts, source)
-  // 编辑时只检查源码；编译和题目数据留给显式运行/提交，避免占满评测队列。
-  if (mode === 'validate') {
-    result.verdict = 'CHECKED'
-    return result
-  }
 
   const cachedFiles = []
   try {
@@ -102,6 +94,7 @@ export async function evaluate({ source, language, indicators, question, mode = 
       if (compiled.status !== 'Accepted') {
         result.verdict = compiled.status === 'Internal Error' ? 'ERROR' : 'CE'
         result.message = compiled.files?.stderr || compiled.files?.stdout || compiled.error || compiled.status
+        result.checks = checkContracts(indicators, facts, source)
         return result
       }
       if (runtime.artifact) {
@@ -113,7 +106,6 @@ export async function evaluate({ source, language, indicators, question, mode = 
 
     result.verdict = 'AC'
     const limit = memoryLimit(indicators, question.memoryLimitBytes)
-    const inputs = mode === 'sample' ? question.cases.slice(0, 1) : question.cases
     for (const [index, item] of inputs.entries()) {
       const run = await sandbox({
         args: runtime.run,
@@ -141,12 +133,8 @@ export async function evaluate({ source, language, indicators, question, mode = 
       { ...facts, memoryBytes: result.memoryBytes, memoryExceeded: result.verdict === 'MLE' },
       source,
     )
-    if (result.verdict === 'AC') {
-      result.score = result.checks
-        .filter((item) => ['passed', 'manual'].includes(item.status))
-        .reduce((sum, item) => sum + item.points, 0)
-      result.passed = result.checks.every((item) => ['passed', 'manual'].includes(item.status))
-    }
+    result.passed =
+      result.verdict === 'AC' && result.checks.every(({ status }) => status === 'passed' || status === 'manual')
     return result
   } finally {
     await Promise.allSettled(

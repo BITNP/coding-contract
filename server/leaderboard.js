@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { languageById } from '../shared/languages.js'
 import { questions } from './questions/index.js'
 
-export const rankingOrder = 'score DESC, duration_ms, finished_at, id'
+const rankingOrder = 'score DESC, duration_ms, finished_at, id'
 
 export function leaderboard(db) {
   const top = db.prepare(`
@@ -21,13 +21,13 @@ export function leaderboard(db) {
         const operation = JSON.parse(data)
         const { name, avatar } = operation.user
         return {
+          id: operation.id,
           rank: index + 1,
           name,
           avatar,
           score: operation.score,
           language: languageById[operation.language].name,
           durationMs: duration_ms,
-          updatedAt: operation.finishedAt,
           question: questions[operation.submission.question].title,
           contracts: operation.contracts,
         }

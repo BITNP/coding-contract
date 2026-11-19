@@ -54,7 +54,8 @@ test('非 C 系语法不会误用 C++ 的本地行数分析', () => {
 })
 
 test('缺失分析数据保持待验证，不计为指标通过', () => {
-  const checks = checkContracts(['lines-1', 'source-3'], { bytes: 300 }, '')
+  const checks = checkContracts(['lines-1', 'source-3', 'memory-1'], { bytes: 300 }, '')
   assert.equal(checks[0].status, 'pending')
   assert.equal(checks[1].status, 'failed')
+  assert.equal(checks[2].status, 'pending')
 })

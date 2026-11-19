@@ -1,7 +1,4 @@
-import { timeLimit } from '../shared/contracts.js'
-import { publicQuestion, questions } from './questions/index.js'
-
-const choices = Object.values(questions).map(publicQuestion)
+import { pointsOf, timeLimit } from '../shared/contracts.js'
 
 export function createOperation({ id, language, indicators, user, now }) {
   return {
@@ -18,39 +15,23 @@ export function createOperation({ id, language, indicators, user, now }) {
   }
 }
 
-export function finishOperation(operation, phase, at, score = 0) {
+export function finishOperation(operation, phase, at = operation.deadline) {
   operation.phase = phase
-  operation.score = score
+  if (phase === 'passed') operation.score = pointsOf(operation.contracts)
   operation.finishedAt = at < operation.deadline ? at : operation.deadline
 }
 
 export function operationView(operation) {
-  const {
-    id,
-    user,
-    language,
-    contracts,
-    phase,
-    score,
-    version,
-    createdAt,
-    deadline,
-    finishedAt,
-    submission,
-  } = operation
   return {
-    id,
-    user,
-    language,
-    contracts,
-    phase,
-    score,
-    version,
-    createdAt,
-    deadline,
-    finishedAt,
-    submission,
-    questions: choices,
+    id: operation.id,
+    language: operation.language,
+    contracts: operation.contracts,
+    phase: operation.phase,
+    score: operation.score,
+    version: operation.version,
+    deadline: operation.deadline,
+    finishedAt: operation.finishedAt,
+    submission: operation.submission,
     serverTime: Date.now(),
   }
 }

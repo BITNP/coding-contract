@@ -4,8 +4,8 @@ import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { authConfig, createAuth } from './auth.js'
 import { createAdminRouter } from './admin.js'
-import { leaderboard, rankingOrder } from './leaderboard.js'
-import { questions } from './questions/index.js'
+import { leaderboard } from './leaderboard.js'
+import { publicQuestions, questions } from './questions/index.js'
 import { evaluate } from './judge.js'
 import { openDatabase, transaction } from './database.js'
 import { createOperation, finishOperation, operationView } from './operations.js'
@@ -49,8 +49,8 @@ app.use('/api', (_req, res, next) => {
 })
 
 const statements = {
-  best: db.prepare(`SELECT score, finished_at AS updatedAt FROM operations
-    WHERE user_id = ? AND finished_at IS NOT NULL ORDER BY ${rankingOrder} LIMIT 1`),
+  best: db.prepare(`SELECT COALESCE(MAX(score), 0) AS score FROM operations
+    WHERE user_id = ? AND finished_at IS NOT NULL`),
   insert: db.prepare('INSERT INTO operations (id, user_id, data) VALUES (?, ?, ?)'),
   find: db.prepare('SELECT data FROM operations WHERE id = ? AND user_id = ?'),
   active: db.prepare('SELECT id FROM operations WHERE user_id = ? AND finished_at IS NULL'),
@@ -79,7 +79,7 @@ function settleExpired() {
     for (const { data } of statements.due.all(cutoff)) {
       const operation = JSON.parse(data)
       if (judging.get(operation.id) === operation.version) continue
-      finishOperation(operation, 'expired', operation.deadline)
+      finishOperation(operation, 'expired')
       operation.version++
       save(operation)
     }
@@ -106,7 +106,7 @@ app.use('/api/leaderboard', leaderboard(db))
 app.use('/api/admin', createAdminRouter({ db, auth }))
 
 app.get('/api/records/best', (req, res) => {
-  res.json(statements.best.get(user(req).id) || { score: 0, updatedAt: null })
+  res.json(statements.best.get(user(req).id))
 })
 
 app.use('/api/operations', (req, _res, next) => {
@@ -124,9 +124,9 @@ app.post('/api/operations', (req, res) => {
   const { indicators, language } = req.body
   checkSelection(indicators, language)
   const owner = user(req)
-  const operation = transaction(db, () => {
+  const id = transaction(db, () => {
     const active = statements.active.get(owner.id)
-    if (active) return findOperation(active.id, owner.id)
+    if (active) return active.id
     const operation = createOperation({
       id: randomUUID(),
       language,
@@ -135,9 +135,9 @@ app.post('/api/operations', (req, res) => {
       now: Date.now(),
     })
     statements.insert.run(operation.id, owner.id, JSON.stringify(operation))
-    return operation
+    return operation.id
   })
-  res.json(operationView(operation))
+  res.json({ id })
 })
 
 app.get('/api/operations/current', (req, res) => {
@@ -145,7 +145,7 @@ app.get('/api/operations/current', (req, res) => {
 })
 
 app.get('/api/operations/:id', (req, res) => {
-  res.json(operationView(findOperation(req.params.id, user(req).id)))
+  res.json({ ...operationView(findOperation(req.params.id, user(req).id)), questions: publicQuestions })
 })
 
 function updateOperation(req, change) {
@@ -230,7 +230,7 @@ app.post(
   action((operation) => finishOperation(operation, 'abandoned', new Date().toISOString())),
 )
 
-for (const mode of ['validate', 'sample', 'submit']) {
+for (const mode of ['sample', 'submit']) {
   app.post(`/api/operations/:id/${mode}`, async (req, res) => {
     const { version, source, question } = req.body
     const received = Date.now()
@@ -258,9 +258,8 @@ for (const mode of ['validate', 'sample', 'submit']) {
         checkActive(latest, version, grace, received)
         const submittedAt = new Date(received).toISOString()
         latest.submission = { question, source, language, contracts, result, submittedAt }
-        if (result.passed) finishOperation(latest, 'passed', submittedAt, result.score)
-        else if (Date.now() >= Date.parse(latest.deadline))
-          finishOperation(latest, 'expired', latest.deadline)
+        if (result.passed) finishOperation(latest, 'passed', submittedAt)
+        else if (Date.now() >= Date.parse(latest.deadline)) finishOperation(latest, 'expired')
         latest.version++
       })
       res.json(operationView(latest))

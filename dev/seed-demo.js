@@ -1,7 +1,7 @@
 import { openDatabase, transaction } from '../server/database.js'
 import { createOperation, finishOperation } from '../server/operations.js'
 import { questions } from '../server/questions/index.js'
-import { contractById, pointsOf, pruneUnavailable } from '../shared/contracts.js'
+import { contractById, pruneUnavailable } from '../shared/contracts.js'
 import { templates } from '../shared/languages.js'
 
 const full = [
@@ -61,7 +61,6 @@ const iso = (ms) => new Date(ms).toISOString()
 
 function submission({ language, contracts }, question, at, passed) {
   const source = templates[language]
-  const maxScore = pointsOf(contracts)
   const verdict = passed ? 'AC' : 'WA'
   const usage = { timeMs: 2, memoryBytes: 262144 }
   const cases = Array.from({ length: passed ? question.cases.length : 1 }, (_, index) => ({
@@ -79,19 +78,12 @@ function submission({ language, contracts }, question, at, passed) {
       mode: 'submit',
       verdict,
       passed,
-      score: passed ? maxScore : 0,
-      maxScore,
-      checks: contracts.map((id) => {
-        const { name, points, verification } = contractById[id]
-        return {
-          id,
-          name,
-          points,
-          status: verification === 'manual' ? 'manual' : 'passed',
-          messages: [],
-          ranges: [],
-        }
-      }),
+      checks: contracts.map((id) => ({
+        id,
+        status: contractById[id].verification === 'manual' ? 'manual' : 'passed',
+        messages: [],
+        ranges: [],
+      })),
       cases,
       totalCases: question.cases.length,
       ...usage,
@@ -122,12 +114,7 @@ function play(id, [name, language, selection, phase = 'passed', events = []], st
     operation.version++
   }
   if (phase !== 'active')
-    finishOperation(
-      operation,
-      phase,
-      phase === 'expired' ? operation.deadline : iso(at),
-      operation.submission?.result.score,
-    )
+    finishOperation(operation, phase, phase === 'expired' ? operation.deadline : iso(at))
   operation.seenAt = iso(at)
   operation.live = { question: question.id, source: templates[language], language, at: operation.seenAt }
   operation.events = events.map(([type, detail], index) => {

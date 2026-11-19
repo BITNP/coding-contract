@@ -44,7 +44,8 @@ export function createAdminRouter({ db, auth, admins = process.env.ADMIN_USERS }
     const flags = Object.fromEntries(flaggedActivity.map((type) => [type, 0]))
     for (const event of events) if (Object.hasOwn(flags, event.type)) flags[event.type]++
     const current =
-      !submission || (operation.phase !== 'passed' && live?.at > submission.submittedAt) ? live : submission
+      !submission || (!operation.finishedAt && live?.at > submission.submittedAt) ? live : submission
+    const settings = operation.finishedAt && submission ? submission : operation
     return {
       id: operation.id,
       user: operation.user,
@@ -52,18 +53,15 @@ export function createAdminRouter({ db, auth, admins = process.env.ADMIN_USERS }
       deadline: operation.deadline,
       seenAt: operation.seenAt,
       online: now - Date.parse(operation.seenAt) < 60_000,
-      running: !operation.finishedAt,
       phase: operation.phase,
       question: current ? questions[current.question].title : null,
-      contracts: operation.contracts,
-      language: operation.language,
+      contracts: settings.contracts,
+      language: settings.language,
       score: operation.score,
       submission: submission
         ? {
             question: questions[submission.question].title,
             verdict: submission.result.verdict,
-            score: submission.result.score,
-            maxScore: submission.result.maxScore,
             language: submission.language,
             submittedAt: submission.submittedAt,
             ...(detail && { source: submission.source }),

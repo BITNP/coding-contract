@@ -33,12 +33,7 @@ function clock(ms) {
 
 async function load() {
   try {
-    const seen = {}
-    entries.value = (await api.leaderboard()).map((entry) => {
-      const id = `${entry.name}\n${entry.avatar}`
-      seen[id] = (seen[id] || 0) + 1
-      return { ...entry, key: `${id}\n${seen[id]}` }
-    })
+    entries.value = await api.leaderboard()
     syncedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
     status.value = 'live'
   } catch {
@@ -81,7 +76,7 @@ const toggleFullscreen = () =>
       <TransitionGroup appear name="podium" tag="ol" class="podium">
         <li
           v-for="(entry, index) in podium"
-          :key="entry?.key ?? `vacant-${index}`"
+          :key="entry?.id ?? `vacant-${index}`"
           class="podium-card"
           :class="{ vacant: !entry }"
           :style="{ gridRow: index + 1, '--s': index ? 1 : 1.22, '--accent': entry && accents[index] }"
@@ -128,7 +123,7 @@ const toggleFullscreen = () =>
           <TransitionGroup :key="current" appear name="row" tag="ol" class="rows">
             <li
               v-for="(entry, index) in rows"
-              :key="entry.key"
+              :key="entry.id"
               class="row"
               :style="{ gridRow: index + 1, '--i': index }"
             >

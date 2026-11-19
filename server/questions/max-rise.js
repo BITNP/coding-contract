@@ -4,7 +4,6 @@ import { defineQuestion, random } from './data.js'
 const question = {
   id: 'max-rise',
   title: '最长升温',
-  category: '基础算法 / 模拟',
   content: String.raw`## 题目描述
 
 温控站依次记录了 $n$ 次温度读数。请找出最长的一段连续读数，使这一段中每次读数都严格高于前一次，并输出这一段的长度。

@@ -3,15 +3,14 @@ import { json } from 'node:stream/consumers'
 import { test } from 'node:test'
 import { setTimeout as delay } from 'node:timers/promises'
 import { openDatabase } from '../server/database.js'
-import maxRise from '../server/questions/max-rise.js'
 import maze from '../server/questions/maze.js'
 import { submitGraceMs } from '../shared/contracts.js'
 import { listen, startApi } from '../server/tests/http.js'
 
-const answers = new Map([...maxRise.cases, ...maze.cases].map(({ input, answer }) => [input, answer]))
+const answers = new Map(maze.cases.map(({ input, answer }) => [input, answer]))
 const start = { language: 'python', indicators: ['source-1'] }
 const source = 'print(1)'
-const answer = { source, question: 'max-rise' }
+const answer = { source, question: maze.id }
 
 async function fixture(t) {
   let beforeAnalysis
@@ -26,7 +25,7 @@ async function fixture(t) {
       await pause?.()
       stdout = JSON.stringify({ bytes: Buffer.byteLength(cmd.copyIn['main.py'].content), codeLines: 1 })
     } else {
-      stdout = cmd.copyIn['main.py'].content === source ? answers.get(cmd.files[0].content) : 'wrong'
+      stdout = answers.get(cmd.files[0].content) ?? 'wrong'
     }
     res.end(JSON.stringify([{ status: 'Accepted', files: { stdout, stderr: '' }, time: 0, memory: 0 }]))
   })
@@ -85,16 +84,19 @@ test('作战复用活动局，三道题均可查看，放弃后直接结束', as
   await request('/operations', {}, 400)
   await request('/operations', { indicators: [] }, 400)
   const [first, again] = await Promise.all([request('/operations', start), request('/operations', start)])
-  assert.equal(again.id, first.id)
-  assert.deepEqual(first.questions.map((q) => q.id).sort(), ['channel-schedule', 'max-rise', 'maze'])
-  assert.ok(first.questions.every((q) => q.content && !('cases' in q)))
+  assert.deepEqual(again, { id: first.id })
   const path = `/operations/${first.id}`
-  const { version } = first
+  const { questions, version } = await request(path)
+  assert.deepEqual(
+    questions.map((q) => q.id),
+    ['max-rise', 'channel-schedule', 'maze'],
+  )
+  assert.ok(questions.every((q) => q.content && !('cases' in q)))
   assert.deepEqual(await request('/operations/current'), { id: first.id })
   await request(`${path}/contracts`, { version, language: 'python' }, 400)
   await request(`${path}/contracts`, { version, indicators: [] }, 400)
   await request(`${path}/sample`, { version, source }, 400)
-  await request(`${path}/validate`, { version, source, question: ['maze'] }, 400)
+  await request(`${path}/sample`, { version, source, question: ['maze'] }, 400)
   await request(`${path}/submit`, { version, source, question: 'constructor' }, 400)
   await request(`${path}/submit`, { version, question: 'maze' }, 400)
   await request(`${path}/abandon`, {}, 400)
@@ -110,42 +112,54 @@ test('拒绝过期评测，答错后可换题，任意一题通过即按当前�
   const { request, duringSubmit } = await fixture(t)
   const first = await request('/operations', start)
   const path = `/operations/${first.id}`
-  const change = { version: first.version, language: 'python', indicators: ['source-2'] }
+  const change = {
+    version: (await request(path)).version,
+    language: 'python',
+    indicators: ['source-2', 'ancient-1'],
+  }
   await duringSubmit(
     path,
-    first.version,
+    change.version,
     async () => {
-      await request(`${path}/submit`, { version: first.version, ...answer }, 409)
+      await request(`${path}/submit`, { version: change.version, ...answer }, 409)
       await request(`${path}/contracts`, change)
     },
     409,
   )
   const { version, submission } = await request(path)
   assert.equal(submission, undefined)
-  const failed = await request(`${path}/submit`, { version, ...answer, source: 'print(0)' })
+  const failed = await request(`${path}/submit`, { version, source, question: 'max-rise' })
   assert.equal(failed.phase, 'active')
   assert.equal(failed.submission.result.verdict, 'WA')
   assert.equal(failed.submission.question, 'max-rise')
   assert.deepEqual(await request('/leaderboard'), [])
 
-  const next = { version: failed.version, source, question: 'maze' }
-  const snapshot = { source, language: 'python', question: 'maze' }
+  const unmet = await request(`${path}/submit`, {
+    version: failed.version,
+    ...answer,
+    source: source.padEnd(513),
+  })
+  assert.equal(unmet.submission.result.verdict, 'AC')
+  assert.equal(unmet.phase, 'active')
+  assert.equal(unmet.score, 0)
+  const next = { version: unmet.version, ...answer }
+  const snapshot = { ...answer, language: 'python' }
   await request(`${path}/activity`, { events: [], snapshot: { source, language: 'python' } }, 400)
   await request(`${path}/activity`, { events: [], snapshot })
   assert.equal((await request(`/admin${path}`)).live.question, maze.title)
-  assert.equal((await request(`${path}/validate`, next)).verdict, 'CHECKED')
   assert.equal((await request(`${path}/sample`, next)).cases.length, 1)
   const passed = await request(`${path}/submit`, next)
   assert.equal(passed.phase, 'passed')
-  assert.equal(passed.score, 2)
+  assert.equal(passed.score, 3)
   assert.equal(passed.submission.question, 'maze')
   assert.equal(passed.submission.result.totalCases, maze.cases.length)
   await request(`${path}/submit`, { ...next, version: passed.version, question: 'max-rise' }, 403)
   const [record] = await request('/leaderboard')
+  assert.equal(record.id, first.id)
   assert.equal(record.question, maze.title)
   assert.deepEqual(record.contracts, change.indicators)
-  assert.equal(record.score, 2)
-  assert.equal((await request('/records/best')).score, 2)
+  assert.equal(record.score, passed.score)
+  assert.equal((await request('/records/best')).score, passed.score)
   const [summary] = (await request('/admin/operations?all=1')).operations
   const detail = await request(`/admin${path}`)
   assert.equal(summary.question, maze.title)
@@ -158,10 +172,11 @@ test('宽限期内复用原局，已受理的提交判完后结算', async (t) =
   const { request, moveDeadline, duringSubmit } = await fixture(t)
   const first = await request('/operations', start)
   const path = `/operations/${first.id}`
+  const { version } = await request(path)
   const deadline = moveDeadline(first.id, submitGraceMs - 2000)
   assert.equal((await request('/operations', start)).id, first.id)
-  await request(`${path}/sample`, { version: first.version, ...answer }, 403)
-  const passed = await duringSubmit(path, first.version, async () => {
+  await request(`${path}/sample`, { version, ...answer }, 403)
+  const passed = await duringSubmit(path, version, async () => {
     await delay(Math.max(0, Date.parse(deadline) + submitGraceMs + 50 - Date.now()))
     assert.deepEqual(await request('/leaderboard'), [])
     assert.equal((await request('/operations', start)).id, first.id)

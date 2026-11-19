@@ -69,10 +69,8 @@ const requiredFacts = {
 export function checkContracts(ids, facts, source) {
   return ids.map((id) => {
     const item = contractById[id]
-    if (item.verification === 'manual')
-      return { id, name: item.name, points: item.points, status: 'manual', messages: [] }
-    if (item.verification === 'environment')
-      return { id, name: item.name, points: item.points, status: 'passed', messages: [], ranges: [] }
+    if (item.verification === 'manual' || item.verification === 'environment')
+      return { id, status: item.verification === 'manual' ? 'manual' : 'passed', messages: [], ranges: [] }
     const rules = checksFor(id)
     const available = rules.filter(
       (rule) => !requiredFacts[rule.type] || facts[requiredFacts[rule.type]] !== undefined,
@@ -85,8 +83,6 @@ export function checkContracts(ids, facts, source) {
     const ranges = findings.flatMap((finding) => finding.ranges)
     return {
       id,
-      name: item.name,
-      points: item.points,
       status: messages.length ? 'failed' : pending ? 'pending' : 'passed',
       messages,
       ranges,

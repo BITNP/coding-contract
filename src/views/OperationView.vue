@@ -14,7 +14,6 @@ import {
   Clock3,
   MemoryStick,
   ListChecks,
-  Trophy,
   ChevronDown,
   Hourglass,
   LoaderCircle,
@@ -55,9 +54,10 @@ const error = ref('')
 const loading = ref(true)
 const source = ref('')
 const running = ref('')
-const result = ref(null)
+const sample = ref(null)
 const codeEditor = ref(null)
-const questionId = ref('')
+const questions = ref([])
+const selectedId = ref('')
 const adjusting = ref(false)
 const panelReady = ref(false)
 const confirmOpen = ref(false)
@@ -69,10 +69,14 @@ const operationId = route.params.id
 
 const finalSubmission = computed(() => operation.value?.finishedAt && operation.value.submission)
 const language = computed(() => finalSubmission.value?.language ?? operation.value?.language)
-const question = computed(() => operation.value?.questions.find((item) => item.id === questionId.value))
-const questionOptions = computed(() =>
-  operation.value.questions.map(({ id, title }) => ({ key: id, label: title })),
+const question = computed(() =>
+  questions.value.find(({ id }) => id === (finalSubmission.value?.question ?? selectedId.value)),
 )
+const questionOptions = computed(() => questions.value.map(({ id, title }) => ({ key: id, label: title })))
+const submission = computed(() => {
+  const last = operation.value?.submission
+  return last && last.question === question.value?.id && last.language === language.value ? last : null
+})
 const ids = computed(() => finalSubmission.value?.contracts ?? operation.value?.contracts ?? [])
 const points = computed(() => pointsOf(ids.value))
 const masked = computed(() => senseLevel(ids.value))
@@ -95,51 +99,40 @@ function save() {
   if (saveDraft()) message.success('草稿已保存在本地')
   else message.error('草稿保存失败，请检查浏览器本地存储')
 }
-function matchingSubmission() {
-  const { submission } = operation.value
-  return submission?.question === questionId.value && submission.language === language.value ? submission : null
-}
-function restoreSource() {
-  const submission = matchingSubmission()
-  const draft = readDraft(questionId.value, language.value)
-  const useDraft =
-    draft && !finalSubmission.value &&
-    (!submission || draft.savedAt + clockOffset.value > Date.parse(submission.submittedAt))
-  source.value = baseline = useDraft ? draft.source : submission?.source ?? templates[language.value]
-}
-function showSubmission() {
-  const submission = matchingSubmission()
-  result.value =
-    submission?.source === source.value &&
-    submission.contracts.length === ids.value.length &&
-    submission.contracts.every((id) => ids.value.includes(id))
-      ? submission.result
-      : null
-}
+watch([() => question.value?.id, language, finalSubmission], ([id, lang, final]) => {
+  const draft = readDraft(id, lang)
+  const last = submission.value
+  const useDraft = draft && !final && (!last || draft.savedAt + clockOffset.value > Date.parse(last.submittedAt))
+  source.value = baseline = useDraft ? draft.source : last?.source ?? templates[lang]
+})
 function selectQuestion(id) {
-  if (ended.value || id === questionId.value) return
+  if (ended.value || id === question.value.id) return
   if (!saveDraft()) return message.error('草稿保存失败，请检查浏览器本地存储')
-  questionId.value = id
+  selectedId.value = id
   writeSelection(operationId, id)
-  restoreSource()
-  showSubmission()
 }
-function apply(next) {
-  const previous = operation.value
-  const selection = questionId.value || readSelection(operationId)
-  const selected = next.finishedAt && next.submission
-    ? next.submission.question
-    : next.questions.find((item) => item.id === selection)?.id ?? next.submission?.question ?? next.questions[0].id
+function apply({ questions: catalog, ...next }) {
   saveDraft()
+  if (catalog) {
+    const preferred = selectedId.value || readSelection(operationId)
+    selectedId.value = catalog.some(({ id }) => id === preferred)
+      ? preferred
+      : next.submission?.question ?? catalog[0].id
+    questions.value = catalog
+  }
   operation.value = next
   clockOffset.value = next.serverTime - Date.now()
-  if (questionId.value !== selected || previous?.language !== next.language || finalSubmission.value) {
-    questionId.value = selected
-    restoreSource()
-  }
-  showSubmission()
+  sample.value = null
 }
 
+const result = computed(() => {
+  if (running.value === 'sample' || running.value === 'submit') return null
+  if (sample.value) return sample.value
+  const last = submission.value
+  return last && last.source === source.value &&
+    last.contracts.length === ids.value.length && last.contracts.every((id) => ids.value.includes(id))
+    ? last.result : null
+})
 const resultAccepted = computed(
   () =>
     result.value && (result.value.mode === 'sample' ? result.value.verdict === 'AC' : result.value.passed),
@@ -201,7 +194,7 @@ watch(finished, async (value) => {
 const live = computed(() => Boolean(operation.value) && !ended.value)
 const integrity = useIntegrity(operationId, {
   active: () => live.value,
-  snapshot: () => ({ question: questionId.value, source: source.value, language: language.value }),
+  snapshot: () => ({ question: question.value?.id, source: source.value, language: language.value }),
 })
 const { fullscreen } = integrity
 const fullscreenRequired = computed(() => live.value && integrity.supported && !fullscreen.value)
@@ -210,7 +203,7 @@ const marks = computed(() =>
   localChecks.value
     .filter((check) => check.status === 'failed')
     .flatMap((check) =>
-      check.ranges.map((range) => ({ ...range, message: `**未满足「${check.name}」**\n\n${range.message}` })),
+      check.ranges.map((range) => ({ ...range, message: `**未满足「${contractById[check.id].name}」**\n\n${range.message}` })),
     ),
 )
 const checks = computed(() => {
@@ -257,12 +250,10 @@ function abandon() {
 }
 const leave = () => (ended.value ? router.push('/') : (confirmOpen.value = true))
 watch(
-  [source, language, codeEditor],
-  ([code, lang, editor], [oldCode, oldLang], onCleanup) => {
-    if (code !== oldCode || lang !== oldLang) {
-      result.value = null
-      facts.value = {}
-    }
+  [source, language, codeEditor, () => question.value?.id],
+  ([code, lang, editor], _, onCleanup) => {
+    sample.value = null
+    facts.value = {}
     if (!editor) return
     let current = true
     const timer = setTimeout(async () => {
@@ -291,11 +282,11 @@ function run(action) {
   if (!blocked(action)) return submitCode(action)
 }
 function submitCode(action) {
-  result.value = null
-  return act(action, { question: questionId.value, source: source.value })
+  return act(action, { question: question.value.id, source: source.value })
 }
 function act(action, fields) {
   if (running.value || finished.value || (timeUp.value && action !== 'submit')) return task
+  sample.value = null
   running.value = action
   task = execute(action, fields)
   return task
@@ -305,7 +296,7 @@ async function execute(action, fields) {
     if (action === 'sample') sampleRequest = new AbortController()
     const response = await api.operationAction(operation.value, action, fields, sampleRequest?.signal)
     if (action === 'sample') {
-      if (fields.question === questionId.value && fields.source === source.value) result.value = response
+      if (fields.question === question.value.id && fields.source === source.value) sample.value = response
       return
     }
     apply(response)
@@ -373,7 +364,7 @@ onBeforeUnmount(() => {
 
           <div class="editor-frame">
             <CodeEditor
-              :question="questionId"
+              :question="question.id"
               ref="codeEditor"
               v-model="source"
               :language="language"
@@ -402,11 +393,6 @@ onBeforeUnmount(() => {
               >
               <span title="峰值内存"
                 ><MemoryStick :size="14" /><i>{{ mib(result.memoryBytes) }} MiB</i></span
-              >
-              <b v-if="result.mode !== 'sample'" title="已获分 / 指标总分"
-                ><Trophy :size="14" /><i
-                  >{{ result.score }}<small>/{{ result.maxScore }}</small></i
-                ></b
               >
               <ChevronDown class="result-chevron" :size="16" />
             </summary>
@@ -797,16 +783,9 @@ onBeforeUnmount(() => {
 .result-summary small {
   color: var(--muted);
 }
-.result-summary > b {
-  margin-left: auto;
-  font-weight: 400;
-}
 .result-chevron {
   margin-left: auto;
   transition: transform 0.15s;
-}
-.result-summary > b + .result-chevron {
-  margin-left: 0;
 }
 .execution-result[open] .result-chevron {
   transform: rotate(180deg);

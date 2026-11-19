@@ -80,8 +80,8 @@ function ago(iso) {
   if (total < 60) return `${total} 秒前`
   return total < 3600 ? `${Math.floor(total / 60)} 分钟前` : `${Math.floor(total / 3600)} 小时前`
 }
-function remaining({ deadline, running }) {
-  if (!running) return { text: '已结束', state: 'ended' }
+function remaining({ deadline, phase }) {
+  if (phase !== 'active') return { text: '已结束', state: 'ended' }
   const left = Date.parse(deadline) - current.value
   if (left <= 0) return { text: left > -submitGraceMs ? '宽限中' : '已结束', state: 'ended' }
   const total = Math.ceil(left / 1000)
@@ -93,11 +93,13 @@ function describe({ type, detail }) {
   return detail && (type === 'visible' || type === 'focus') ? `${label}（离开 ${seconds(detail)}）` : label
 }
 function decorate(item) {
+  const verdict = item.submission?.verdict
   return {
     ...item,
     left: remaining(item),
     alerts: flagKinds.filter((kind) => item.flags[kind.type] > 0),
     away: item.awayMs >= 1000,
+    verdict: verdict === 'AC' && item.phase !== 'passed' ? '指标未满足' : verdict,
   }
 }
 
@@ -145,7 +147,7 @@ async function load() {
 function select(item) {
   if (item.id === selectedId.value) return
   selectedId.value = item.id
-  detail.value = operations.value.find((operation) => operation.id === item.id)
+  detail.value = item
   codeView.value = 'live'
   load()
 }
@@ -202,7 +204,7 @@ onBeforeUnmount(() => {
             v-for="item in rows"
             :key="item.id"
             class="op-card"
-            :class="{ selected: item.id === selectedId, ended: !item.running }"
+            :class="{ selected: item.id === selectedId, ended: item.phase !== 'active' }"
             tabindex="0"
             @click="select(item)"
             @keydown.enter="select(item)"
@@ -249,8 +251,8 @@ onBeforeUnmount(() => {
 
             <div class="score">
               <strong><span class="num">{{ item.score }}</span><img src="/assets/risk-level.webp" alt="分" /></strong>
-              <small v-if="item.submission" :class="{ accepted: item.submission.verdict === 'AC' }"
-                >最近 {{ item.submission.verdict }}</small
+              <small v-if="item.submission" :class="{ accepted: item.phase === 'passed' }"
+                >最近 {{ item.verdict }}</small
               >
             </div>
           </li>
@@ -289,10 +291,10 @@ onBeforeUnmount(() => {
               <li><FileText :size="15" />题目<b>{{ view.question || '—' }}</b></li>
               <li><Flag :size="15" />状态<b>{{ phaseLabels[view.phase] }}</b></li>
               <li><Trophy :size="15" />作战得分<b class="num">{{ view.score }}</b></li>
-              <li :class="view.submission && (view.submission.verdict === 'AC' ? 'accepted' : 'hot')">
+              <li :class="view.submission && (view.phase === 'passed' ? 'accepted' : 'hot')">
                 <Send :size="15" />最近提交<b>{{
                   view.submission
-                    ? `${view.submission.question} · ${view.submission.verdict}`
+                    ? `${view.submission.question} · ${view.verdict}`
                     : '未提交'
                 }}</b>
               </li>

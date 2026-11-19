@@ -11,12 +11,11 @@ const { cases } = question
 const submit = (language, source, indicators = []) => evaluate({ language, source, indicators, question })
 
 for (const language of languages) {
-  test(`${language.name} 参考解通过全部边界数据并计分`, integration, async () => {
+  test(`${language.name} 参考解通过全部边界数据与所选指标`, integration, async () => {
     const result = await submit(language.id, solutions[language.id], ['source-1'])
     assert.equal(result.verdict, 'AC', JSON.stringify(result))
     assert.equal(result.cases.length, cases.length)
     assert.equal(result.passed, true)
-    assert.equal(result.score, 1)
     assert.ok(Number.isFinite(result.timeMs))
     assert.ok(result.codeLines > 0)
   })
@@ -84,7 +83,7 @@ test('低等数学 I 检查 Python 整除及其复合赋值', integration, async
     source: 'x = 8 // 3\nx //= 2',
     indicators: ['ancient-3', 'arithmetic-1'],
     question,
-    mode: 'validate',
+    mode: 'sample',
   })
   const check = result.checks.find(({ id }) => id === 'arithmetic-1')
   assert.equal(check.status, 'failed')
@@ -143,7 +142,6 @@ test('编译错误、类型错误、答案错误、运行错误、超时和输�
     const result = await submit(language, source)
     assert.equal(result.verdict, verdict, JSON.stringify(result))
     assert.equal(result.passed, false)
-    assert.equal(result.score, 0)
   }
 })
 
@@ -170,31 +168,9 @@ test('各词法器保留字符串中的注释标记，排除纯注释行', integ
     ['php', '<?php\n// comment\necho "// text";\n', 2],
   ]
   for (const [language, source, codeLines] of samples) {
-    const result = await evaluate({ language, source, indicators: [], question, mode: 'validate' })
+    const result = await evaluate({ language, source, indicators: [], question, mode: 'sample' })
     assert.equal(result.codeLines, codeLines, language)
-    assert.equal(result.cases.length, 0)
   }
-})
-
-test('样例只运行一组，自动校验不编译运行，运行内存保持待验证', integration, async () => {
-  const sample = await evaluate({
-    language: 'python',
-    source: solutions.python,
-    indicators: [],
-    question,
-    mode: 'sample',
-  })
-  assert.equal(sample.cases.length, 1)
-  const result = await evaluate({
-    language: 'javascript',
-    source: 'while (true) {}',
-    indicators: ['ancient-3', 'memory-1'],
-    question,
-    mode: 'validate',
-  })
-  assert.equal(result.verdict, 'CHECKED')
-  assert.equal(result.cases.length, 0)
-  assert.equal(result.checks.find((check) => check.id === 'memory-1').status, 'pending')
 })
 
 test('最大规模拒绝重复扫描每个上升段起点的平方解', integration, async () => {

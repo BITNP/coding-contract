@@ -3,7 +3,6 @@ import { defineQuestion, random } from './data.js'
 const question = {
   id: 'channel-schedule',
   title: '信道排班',
-  category: '贪心 / 区间调度',
   content: String.raw`## 题目描述
 
 中继站只有一条信道，共收到 $n$ 个传输请求。第 $i$ 个请求必须从时刻 $s_i$ 开始，持续占用信道直到时刻 $e_i$。请求的时间固定，选中的请求必须完整执行。
