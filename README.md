@@ -6,13 +6,13 @@
 
 Debian 13（ARM64 / x86_64），建议 4 核、4 GiB 内存、20 GiB 可用磁盘。
 
-上传 `server/` 和 `shared/` 到同一目录，执行：
+上传 `server/` 和 `shared/` 到同一目录，按下节说明配置统一认证后执行：
 
 ```sh
 sudo sh server/install.sh
 ```
 
-API 默认端口为 `3001`。将 API 域名反向代理到该端口并配置 HTTPS。
+API 默认监听 `127.0.0.1:3001`。将 API 域名反向代理到该端口并配置 HTTPS。
 
 编辑 `/etc/pioneer/api.env`，将 `CORS_ORIGINS` 设为前端来源（如 `https://www.example.com`，多个用逗号分隔）。前端与 API 跨站点时，另设 `COOKIE_SAME_SITE=none`。
 
@@ -25,7 +25,7 @@ curl http://127.0.0.1:3001/api/session
 
 使用 Keycloak OIDC 授权码 + PKCE 登录，应用不接收统一账号密码。生产部署前在 Keycloak 的 `master` realm 注册独立客户端，可导入 [客户端配置](deploy/keycloak-client.json)。
 
-在 `/etc/pioneer/api.env` 中完整配置：
+首次安装前创建 `/etc/pioneer` 目录，将以下配置写入 `/etc/pioneer/api.env`，文件权限设为 `600`。
 
 ```dotenv
 OIDC_ISSUER=https://login.bitnp.net/realms/master
@@ -35,13 +35,14 @@ OIDC_REDIRECT_URL=https://oj.bitnp.net/api/auth/callback
 APP_PUBLIC_URL=https://oj.bitnp.net
 CORS_ORIGINS=https://oj.bitnp.net
 COOKIE_SAME_SITE=lax
+ADMIN_USERS=
 ```
 
-客户端启用 Standard Flow、关闭 Direct Access Grants，并要求 PKCE S256。密钥只保存在服务器环境文件中，文件权限设为 `600`，不要提交到仓库或发送到聊天。已有客户端时先核对配置，避免覆盖。
+客户端启用 Standard Flow、关闭 Direct Access Grants，并要求 PKCE S256。密钥只保存在服务器环境文件中，已有客户端时先核对配置，避免覆盖。管理员名单填写 OIDC 的稳定 `sub`，多个 ID 以逗号分隔，可从已登录用户的 `/api/session` 响应读取 `user.id`。
 
 前端 `/api/` 必须反代到 API（包括 `/api/auth/login` 和 `/api/auth/callback`），回调地址须精确匹配。认证地址和站点地址使用 HTTPS；生产 Cookie 固定启用 Secure，不依赖代理头推断。
 
-登录后以 Keycloak 的稳定 `sub` 保存用户记录，未登录不能访问作战或最高分 API。会话保存在内存中、最长 24 小时，API 重启后需重新登录；退出仅注销本应用会话。未配置任何 OIDC 参数时保留本地访客模式，访客共用记录；生产环境应在启动 API 前配置完整认证参数。旧 `AUTH_API_URL` 已停用，缺少部分 OIDC 参数会阻止启动。
+登录后以 Keycloak 的 `sub` 保存用户记录，作战和最高分 API 都要求登录。会话保存在内存中，最长 24 小时，API 重启后需重新登录，退出仅注销本应用会话。生产服务要求完整的 OIDC 配置。本地开发可显式设置 `ALLOW_GUEST=1` 并留空四项 OIDC 参数，以共享访客身份体验作战和管理台。
 
 ## 前端
 

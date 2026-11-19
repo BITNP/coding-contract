@@ -1,7 +1,9 @@
+import { defineQuestion, random, sequenceCases } from './data.js'
+
 // 题型参考：洛谷 P1115，题面、范围和评测数据独立编写。
-export const question = {
+const question = {
   id: 'max-subarray',
-  title: '补给窗口 · 最大连续总和',
+  title: '补给窗口',
   category: '基础算法 / 线性动态规划',
   content: String.raw`## 题目描述
 
@@ -30,14 +32,12 @@ export const question = {
 6
 ~~~
 
-选择第 $2$ 至第 $4$ 条记录，总和为 $3-1+4=6$。
+选择第 $2$ 至第 $4$ 条记录，总和为 $3-1+4=6$。若记录为 $[-8,-2,-9,-3]$，只选第 $2$ 条即可，最大总和为 $-2$。
 
 ## 数据范围
 
 $1 \le n \le 200000$，$-10^6 \le a_i \le 10^6$。答案可能超出 32 位有符号整数范围，请选择合适的数值类型。`,
-  timeLimitMs: 2000,
-  memoryLimitBytes: 268435456,
-  templates: {
+  solutions: {
     cpp: '#include <cstdio>\nint main() {\n  int n; long long x, s = 0, b = -1000000;\n  scanf("%d", &n);\n  while (n--) { scanf("%lld", &x); s = x + (s > 0 ? s : 0); if (s > b) b = s; }\n  printf("%lld\\n", b);\n}\n',
     c: '#include <stdio.h>\nint main(void) {\n  int n; long long x, s = 0, b = -1000000;\n  scanf("%d", &n);\n  while (n--) { scanf("%lld", &x); s = x + (s > 0 ? s : 0); if (s > b) b = s; }\n  printf("%lld\\n", b);\n  return 0;\n}\n',
     python:
@@ -65,7 +65,7 @@ $1 \le n \le 200000$，$-10^6 \le a_i \le 10^6$。答案可能超出 32 位有�
 }
 
 // 数据仅存在于服务端。前缀最小值法生成答案，与模板的 Kadane 转移独立。
-function makeCase(values) {
+function maxSubarray(values) {
   let prefix = 0
   let minimum = 0
   let best = -Infinity
@@ -74,18 +74,13 @@ function makeCase(values) {
     best = Math.max(best, prefix - minimum)
     minimum = Math.min(minimum, prefix)
   }
-  return { input: values.length + '\n' + values.join(' ') + '\n', answer: String(best) }
+  return best
 }
 
-let seed = 0x1937
-function randomValues(length, bound) {
-  return Array.from({ length }, () => {
-    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
-    return (seed % (2 * bound + 1)) - bound
-  })
-}
+const rng = random(0x1937)
+const randomValues = (length, bound) => Array.from({ length }, () => (rng.next() % (2 * bound + 1)) - bound)
 
-export const cases = [
+export default defineQuestion(question, () => sequenceCases([
   [-2, 3, -1, 4, -6, 2, 2, -1],
   [-1000000],
   [1000000],
@@ -103,4 +98,4 @@ export const cases = [
   [1000000, ...Array(19998).fill(-1), 1000000],
   ...Array.from({ length: 12 }, (_, i) => randomValues(i * 7 + 2, 17)),
   randomValues(200000, 1000000),
-].map(makeCase)
+], maxSubarray))

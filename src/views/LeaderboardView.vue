@@ -1,8 +1,11 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { Trophy } from 'lucide-vue-next'
+import { Clock3, Code2, Trophy } from 'lucide-vue-next'
 import { api } from '../api'
 import Halftone from '../components/Halftone.vue'
+import Digits from '../components/Digits.vue'
+import RoundPopover from '../components/RoundPopover.vue'
+import { contractById, levelNames } from '../../shared/contracts.js'
 
 const interval = 12_000
 const perPage = 10
@@ -35,7 +38,12 @@ async function load() {
     entries.value = (await api.leaderboard()).map((entry) => {
       const id = `${entry.name}\n${entry.avatar}`
       seen[id] = (seen[id] || 0) + 1
-      return { ...entry, key: `${id}\n${seen[id]}` }
+      const rounds = entry.rounds.map((round, index) => ({
+        ...round,
+        mark: levelNames[index],
+        items: round.contracts.map((contract) => contractById[contract]),
+      }))
+      return { ...entry, rounds, key: `${id}\n${seen[id]}` }
     })
     syncedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
     status.value = 'live'
@@ -67,10 +75,10 @@ const toggleFullscreen = () =>
       </div>
       <div class="board-meta">
         <div class="board-count">
-          <strong class="num">{{ pad(entries.length) }}</strong><span>上榜人数</span>
+          <strong><Digits :value="pad(entries.length)" /></strong><span>上榜人数</span>
         </div>
         <span class="board-status" :data-status="status"
-          ><i />{{ statusText[status] }}<span v-if="status === 'live'" class="num">{{ syncedAt }}</span></span
+          ><i />{{ statusText[status] }}<span v-if="status === 'live'">{{ syncedAt }}</span></span
         >
       </div>
     </header>
@@ -106,9 +114,12 @@ const toggleFullscreen = () =>
             /></span>
             <h2>{{ entry.name }}</h2>
             <p class="podium-meta">
-              <span class="language">{{ entry.language }}</span>
-              <span>用时<b class="num">{{ clock(entry.durationMs) }}</b></span>
+              <span><Code2 />{{ entry.language }}</span>
+              <span><Clock3 /><b>{{ clock(entry.durationMs) }}</b></span>
             </p>
+            <div class="round-lines">
+              <RoundPopover v-for="round in entry.rounds" :key="round.mark" :round="round" />
+            </div>
             <span class="score"
               ><strong class="num">{{ entry.score }}</strong><img src="/assets/risk-level.webp" alt=""
             /></span>
@@ -118,9 +129,6 @@ const toggleFullscreen = () =>
       </TransitionGroup>
 
       <div class="board-list" :style="{ '--interval': `${interval}ms` }">
-        <div class="rows-head">
-          <span>排名</span><span /><span>参与者</span><span>语言</span><span>用时</span><span>分数</span>
-        </div>
         <Transition name="board-page" mode="out-in">
           <TransitionGroup :key="current" appear name="row" tag="ol" class="rows">
             <li
@@ -139,9 +147,13 @@ const toggleFullscreen = () =>
                   referrerpolicy="no-referrer"
                   @error="$event.target.hidden = true"
               /></span>
-              <h3>{{ entry.name }}</h3>
-              <span class="language">{{ entry.language }}</span>
-              <span class="row-time num">{{ clock(entry.durationMs) }}</span>
+              <div class="row-copy">
+                <h3>{{ entry.name }}</h3>
+                <p><Code2 />{{ entry.language }}<i /><Clock3 />{{ clock(entry.durationMs) }}</p>
+              </div>
+              <div class="round-lines">
+                <RoundPopover v-for="round in entry.rounds" :key="round.mark" :round="round" />
+              </div>
               <span class="score"
                 ><strong class="num">{{ entry.score }}</strong><img src="/assets/risk-level.webp" alt=""
               /></span>
@@ -175,8 +187,8 @@ const toggleFullscreen = () =>
   height: calc(100dvh - var(--page-bottom));
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 4vmin;
-  padding: 4vmin 0 2.4vmin;
+  gap: 2.6vmin;
+  padding: 2.4vmin 0 2vmin;
   user-select: none;
 }
 
@@ -189,28 +201,28 @@ const toggleFullscreen = () =>
 .board-head::after {
   content: '';
   position: absolute;
-  inset: auto 0 -2vmin;
+  inset: auto 0 -1.3vmin;
   height: 1px;
   background: linear-gradient(90deg, #ffffff38, #ffffff0a 70%);
 }
 .board-watermark {
   position: absolute;
-  width: 30vmin;
-  height: 30vmin;
-  top: -9vmin;
-  left: -3vmin;
+  width: 20vmin;
+  height: 20vmin;
+  top: -6vmin;
+  left: -2vmin;
   opacity: 0.08;
   filter: brightness(0) invert(1);
   pointer-events: none;
 }
 .board-marker {
   align-self: stretch;
-  width: 1.8vmin;
-  border-left: 0.8vmin solid #ededed;
+  width: 1.4vmin;
+  border-left: 0.6vmin solid #ededed;
   background: repeating-linear-gradient(45deg, #ededed 0 2px, transparent 2px 5px);
 }
 .board-event {
-  font-size: 2.4vmin;
+  font-size: 1.7vmin;
   letter-spacing: 0.24em;
   color: var(--soft);
 }
@@ -222,14 +234,14 @@ const toggleFullscreen = () =>
 .board-head h1 {
   display: flex;
   align-items: baseline;
-  gap: 2.4vmin;
-  margin-top: 0.4vmin;
-  font-size: 8vmin;
+  gap: 1.8vmin;
+  margin-top: 0.2vmin;
+  font-size: 5.2vmin;
   line-height: 1.05;
   letter-spacing: 0.14em;
 }
 .board-head h1 small {
-  font: 400 2vmin var(--font-display);
+  font: 400 1.5vmin var(--font-display);
   letter-spacing: 0.32em;
   color: var(--muted);
 }
@@ -237,7 +249,7 @@ const toggleFullscreen = () =>
   display: flex;
   align-items: center;
   gap: 1vmin;
-  margin-top: 0.8vmin;
+  margin-top: 0.4vmin;
   color: #a0a3a6;
   font-size: 0.9vmin;
   letter-spacing: 0.4vmin;
@@ -259,12 +271,12 @@ const toggleFullscreen = () =>
   align-items: flex-end;
 }
 .board-count strong {
-  font-size: 8vmin;
+  font-size: 5.2vmin;
   line-height: 0.9;
 }
-.board-count span {
-  margin-top: 0.8vmin;
-  font-size: 1.9vmin;
+.board-count > span {
+  margin-top: 0.4vmin;
+  font-size: 1.5vmin;
   letter-spacing: 0.12em;
   color: var(--soft);
 }
@@ -272,12 +284,11 @@ const toggleFullscreen = () =>
   display: flex;
   align-items: center;
   gap: 1.2vmin;
-  padding: 1.1vmin 2vmin;
+  padding: 0.8vmin 1.6vmin;
   border: 1px solid #ffffff1f;
-  font-size: 1.9vmin;
+  font-size: 1.6vmin;
   letter-spacing: 0.06em;
   color: var(--soft);
-  font-variant-numeric: tabular-nums;
 }
 .board-status i {
   width: 1.1vmin;
@@ -321,10 +332,13 @@ const toggleFullscreen = () =>
   overflow: hidden;
   grid-column: 1;
   display: grid;
-  grid-template: 'avatar name score' auto 'avatar meta score' auto / auto minmax(0, 1fr) auto;
+  grid-template:
+    'avatar name score' auto
+    'avatar meta score' auto
+    'rounds rounds rounds' auto / auto minmax(0, 1fr) auto;
   align-content: center;
-  column-gap: calc(2.6vmin * var(--s));
-  padding: 3vmin 3.4vmin 2vmin 3.4vmin;
+  column-gap: calc(2.4vmin * var(--s));
+  padding: 2.4vmin 3vmin 2vmin;
   border-left: 0.6vmin solid var(--accent);
   background: linear-gradient(105deg, #2e2f33, #232428 55%, color-mix(in srgb, var(--accent) 18%, #232428));
   clip-path: polygon(0 0, 100% 0, 100% calc(100% - 3vmin), calc(100% - 3vmin) 100%, 0 100%);
@@ -346,8 +360,8 @@ const toggleFullscreen = () =>
 }
 .podium-card .avatar {
   grid-area: avatar;
-  width: calc(10vmin * var(--s));
-  font-size: calc(4.4vmin * var(--s));
+  width: calc(8.4vmin * var(--s));
+  font-size: calc(3.8vmin * var(--s));
   box-shadow:
     0 0 0 0.35vmin var(--accent),
     0 0 3vmin color-mix(in srgb, var(--accent) 40%, transparent);
@@ -365,21 +379,29 @@ const toggleFullscreen = () =>
 }
 .podium-meta {
   grid-area: meta;
+  min-width: 0;
+  overflow: hidden;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 1vmin 2vmin;
-  margin-top: 1.2vmin;
-  font-size: 2vmin;
+  gap: 1.6vmin;
+  margin-top: 0.6vmin;
+  font-size: 1.8vmin;
   color: var(--soft);
 }
 .podium-meta > * {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.8vmin;
   white-space: nowrap;
 }
+.podium-meta svg {
+  width: 2vmin;
+  height: 2vmin;
+  color: var(--muted);
+}
 .podium-meta b {
-  margin-left: 1vmin;
-  font-size: 2.8vmin;
-  font-weight: 400;
+  font-size: 2vmin;
+  font-weight: 500;
   color: var(--text);
 }
 .podium-card .score {
@@ -387,7 +409,7 @@ const toggleFullscreen = () =>
   align-self: center;
 }
 .podium-card .score strong {
-  font-size: calc(8.6vmin * var(--s));
+  font-size: calc(7.2vmin * var(--s));
 }
 .podium-card .score img {
   width: calc(4.4vmin * var(--s));
@@ -434,14 +456,6 @@ h3 {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.language {
-  padding: 0.3vmin 1.2vmin;
-  border: 1px solid #ffffff26;
-  border-radius: 0.4vmin;
-  font-size: 1.9vmin;
-  color: var(--soft);
-  white-space: nowrap;
-}
 .score {
   display: flex;
   align-items: center;
@@ -454,12 +468,11 @@ h3 {
 }
 
 .board-list {
-  --columns: 8vmin 5.6vmin minmax(0, 1fr) 17vmin 12vmin 12vmin;
+  --columns: 8vmin 5.6vmin minmax(0, 1fr) 34vmin 13vmin;
   min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto;
 }
-.rows-head,
 .row {
   display: grid;
   grid-template-columns: var(--columns);
@@ -467,20 +480,8 @@ h3 {
   column-gap: 2vmin;
   padding-right: 2.6vmin;
 }
-.rows-head {
-  padding-bottom: 1.2vmin;
-  font-size: 1.7vmin;
-  letter-spacing: 0.2em;
-  color: var(--muted);
-}
-.rows-head span:first-child {
-  text-align: center;
-}
-.rows-head span:last-child {
-  text-align: right;
-}
 .rows {
-  grid-area: 2 / 1;
+  grid-area: 1 / 1;
   grid-template-rows: repeat(10, minmax(0, 1fr));
   gap: 0.9vmin;
 }
@@ -514,17 +515,56 @@ h3 {
   justify-self: center;
   font-size: 2.4vmin;
 }
-.row h3 {
-  font-size: 3vmin;
+.row-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.3vmin;
+  padding-top: 0.6vmin;
+}
+.row-copy h3 {
+  font-size: 2.6vmin;
   font-weight: 500;
+  line-height: 1.15;
   color: var(--text);
 }
-.row .language {
-  justify-self: start;
+.row-copy p {
+  display: flex;
+  align-items: center;
+  gap: 0.7vmin;
+  font-size: 1.6vmin;
+  color: var(--muted);
+  white-space: nowrap;
 }
-.row-time {
-  font-size: 3vmin;
-  color: var(--soft);
+.row-copy svg {
+  width: 1.9vmin;
+  height: 1.9vmin;
+}
+.row-copy i {
+  width: 1px;
+  height: 1.6vmin;
+  margin: 0 1vmin;
+  background: #ffffff26;
+}
+.round-lines {
+  --line: 1.8vmin;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  column-gap: 1vmin;
+  row-gap: 0.2vmin;
+  align-content: center;
+}
+.podium-card .round-lines {
+  --line: calc(2.2vmin * var(--s));
+  grid-area: rounds;
+  row-gap: 0.6vmin;
+  margin-top: 1.8vmin;
+}
+.row .score {
+  align-self: stretch;
+  padding-left: 2vmin;
+  border-left: 1px solid #ffffff14;
 }
 .row .score strong {
   font-size: 4.4vmin;
@@ -534,7 +574,7 @@ h3 {
   height: 3vmin;
 }
 .rows-vacant {
-  grid-area: 2 / 1;
+  grid-area: 1 / 1;
   align-self: center;
   text-align: center;
   font-size: 2.4vmin;

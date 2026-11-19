@@ -1,12 +1,17 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ChevronLeft, ChevronRight, RotateCcw } from 'lucide-vue-next'
-import { groups, indicators, columnCount } from '../../shared/contracts.js'
-import { selected, setSelection } from '../state.js'
+import { contractById, groups, indicators, columnCount, toggleIndicator } from '../../shared/contracts.js'
+import { indicatorStates } from '../state.js'
 import IndicatorCard from './IndicatorCard.vue'
 import UiButton from './UiButton.vue'
 import Halftone from './Halftone.vue'
 
+const props = defineProps({ ids: Array, language: String, lockFixed: Boolean })
+const emit = defineEmits(['update:ids'])
+const states = computed(() => indicatorStates(props.ids, props.language, props.lockFixed))
+const toggle = (item) => emit('update:ids', toggleIndicator(props.ids, item.id, props.language))
+const kept = computed(() => (props.lockFixed ? props.ids.filter((id) => contractById[id].fixed) : []))
 const board = ref(null)
 const progress = ref(0)
 const thumb = ref(1)
@@ -24,7 +29,7 @@ const connections = groups.flatMap((group) =>
     to: item.level,
   })),
 )
-const activeGroups = computed(() => new Set(selected.value.map((item) => item.group)))
+const activeGroups = computed(() => new Set(props.ids.map((id) => contractById[id].group)))
 const scroll = (distance) => board.value.scrollBy({ left: distance, behavior: 'smooth' })
 const clamp = (value) => Math.max(0, Math.min(1, value))
 const range = () => board.value.scrollWidth - board.value.clientWidth
@@ -72,7 +77,13 @@ onBeforeUnmount(() => observer.disconnect())
       <div ref="board" v-scroll-fade:x="32" class="indicator-scroll" @wheel="wheel" @scroll="updateProgress">
         <div class="indicator-grid" :style="{ '--columns': columnCount }">
           <div v-for="(row, index) in rows" :key="index" class="indicator-row">
-            <IndicatorCard v-for="(item, column) in row" :key="column" :item="item" />
+            <IndicatorCard
+              v-for="(item, column) in row"
+              :key="column"
+              :item="item"
+              :state="item && states[item.id]"
+              @toggle="toggle"
+            />
           </div>
           <div v-for="link in connections" :key="`${link.group}-${link.from}`" class="indicator-connector" :class="{ active: activeGroups.has(link.group) }"
             :style="{ '--column': link.column, '--from': link.from - 1, '--span': link.to - link.from }" />
@@ -95,9 +106,10 @@ onBeforeUnmount(() => observer.disconnect())
           @keydown.right.prevent="scroll(240)"
         ><span /></div>
         <UiButton kind="ghost" icon-only :disabled="!scrollable" aria-label="向右浏览指标" @click="scroll(450)"><ChevronRight :size="18" /></UiButton>
-        <span>{{ scrollable ? '横向滚动浏览全部指标' : '已显示全部指标' }}</span>
       </div>
-      <UiButton kind="dark" :disabled="!selected.length" @click="setSelection([])"><RotateCcw :size="19" />清空选择</UiButton>
+      <UiButton kind="dark" :disabled="ids.length === kept.length" @click="emit('update:ids', kept)"
+        ><RotateCcw :size="19" />清空选择</UiButton
+      >
     </div>
   </div>
 </template>
@@ -130,11 +142,9 @@ onBeforeUnmount(() => observer.disconnect())
 .board-toolbar > .ui-button { height: 34px; padding: 0 16px; font-size: 14px }
 .scroll-hint { display: flex; align-items: center; gap: 6px; color: var(--text); font-size: 14px }
 .scroll-hint .ui-button { width: 24px; height: 28px }
-.scroll-track { position: relative; width: clamp(160px, 13vw, 240px); height: 20px; cursor: pointer; touch-action: none; outline-offset: 2px }
+.scroll-track { position: relative; width: clamp(240px, 26vw, 520px); height: 20px; cursor: pointer; touch-action: none; outline-offset: 2px }
 .scroll-track::before { content: ''; position: absolute; left: 0; right: 0; top: 9px; height: 2px; background: #44484f }
 .scroll-track > span { position: absolute; top: 8px; height: 4px; width: calc(var(--thumb) * 100%); left: calc(var(--progress) * (1 - var(--thumb)) * 100%); background: #bebdb7; border-radius: 2px; transition: background .15s, height .15s, top .15s }
 .scroll-track:hover > span, .scroll-track:active > span { top: 7px; height: 6px; background: var(--text) }
 .scroll-track.disabled { cursor: default; opacity: .4 }
-.scroll-hint > span { margin-left: 10px }
-@media (max-width: 1280px) { .scroll-hint > span { display: none } }
 </style>

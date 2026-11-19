@@ -1,19 +1,18 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { languages } from '../shared/languages.js'
+import { languages, templates } from '../shared/languages.js'
 import { indicators, checksFor, selectionErrors } from '../shared/contracts.js'
 import { checkContracts } from '../shared/checks.js'
 import { sourceFacts } from '../src/sourceFacts.js'
 import { evaluate } from '../server/judge.js'
-import { question } from '../server/question.js'
 import { runtimes } from '../server/runtimes.js'
 
 test('每种可选语言都有模板、运行配置和可用的通用指标', () => {
   for (const language of languages) {
-    assert.ok(question.templates[language.id]?.trim(), language.id)
+    assert.ok(templates[language.id]?.trim(), language.id)
     assert.ok(runtimes[language.id]?.run.length, language.id)
     assert.deepEqual(
-      selectionErrors(['ancient-3', 'source-1', 'lines-1', 'memory-1', 'brackets-2'], language.id),
+      selectionErrors(['ancient-3', 'source-1', 'lines-1', 'memory-1', 'brackets-1'], language.id),
       [],
     )
   }

@@ -35,4 +35,24 @@ export const languages = [
   { id: 'bash', name: 'Bash', editor: 'shell', filename: 'main.sh' },
 ]
 
+export const templates = {
+  cpp: '#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n  \n  return 0;\n}\n',
+  c: '#include <stdio.h>\n\nint main(void) {\n  \n  return 0;\n}\n',
+  python: 'import sys\n\ntext = sys.stdin.read()\n',
+  java: 'import java.io.*;\nimport java.util.*;\n\npublic class Main {\n  public static void main(String... args) throws IOException {\n    \n  }\n}\n',
+  javascript: "const text = require('fs').readFileSync(0, 'utf8')\n",
+  typescript: "import { readFileSync } from 'fs'\n\nconst text = readFileSync(0, 'utf8')\n",
+  go: 'package main\n\nfunc main() {\n  \n}\n',
+  rust: 'fn main() {\n  \n}\n',
+  csharp: 'using System;\n\nclass MainClass {\n  static void Main() {\n    \n  }\n}\n',
+  kotlin: 'fun main() {\n  \n}\n',
+  swift: 'import Foundation\n\n',
+  php: '<?php\n$text = stream_get_contents(STDIN);\n',
+  ruby: 'text = STDIN.read\n',
+  lua: "local text = io.read('a')\n",
+  perl: 'use strict;\nuse warnings;\n\nmy $text = do { local $/; <STDIN> };\n',
+  r: "lines <- readLines(file('stdin'))\n",
+  bash: 'text=$(cat)\n',
+}
+
 export const languageById = Object.fromEntries(languages.map((language) => [language.id, language]))

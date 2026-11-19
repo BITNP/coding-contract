@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs'
-import { contractById, selectionErrors } from '../shared/contracts.js'
+import { pointsOf, selectionErrors } from '../shared/contracts.js'
 import { checkContracts, memoryLimit } from '../shared/checks.js'
-import { question, cases } from './question.js'
 import { languageById } from '../shared/languages.js'
 import { runtimes } from './runtimes.js'
 
@@ -16,6 +15,12 @@ const statusCodes = {
 }
 
 const environment = ['PATH=/usr/bin:/bin', 'LANG=C.UTF-8', 'HOME=/w', 'TMPDIR=/tmp']
+
+function caseVerdict(run, answer, limit) {
+  if (run.memory > limit) return 'MLE'
+  if (run.status !== 'Accepted') return statusCodes[run.status] || 'ERROR'
+  return run.files.stdout.trim() === answer ? 'AC' : 'WA'
+}
 
 async function sandbox(cmd) {
   const response = await fetch(`${process.env.JUDGE_URL || 'http://127.0.0.1:5050'}/run`, {
@@ -40,7 +45,7 @@ async function sandbox(cmd) {
   return result
 }
 
-export async function evaluate({ source, language, indicators, mode = 'submit' }) {
+export async function evaluate({ source, language, indicators, question, mode = 'submit' }) {
   const errors = selectionErrors(indicators, language)
   if (errors.length) throw Object.assign(new Error(errors.join('；')), { status: 400 })
   if (typeof source !== 'string' || !source.trim())
@@ -62,10 +67,10 @@ export async function evaluate({ source, language, indicators, mode = 'submit' }
     verdict: 'CE',
     passed: false,
     score: 0,
-    maxScore: indicators.reduce((sum, id) => sum + contractById[id].points, 0),
+    maxScore: pointsOf(indicators),
     checks: [],
     cases: [],
-    totalCases: mode === 'sample' ? 1 : cases.length,
+    totalCases: mode === 'sample' ? 1 : question.cases.length,
     timeMs: 0,
     memoryBytes: 0,
     sourceBytes: facts.bytes,
@@ -108,7 +113,7 @@ export async function evaluate({ source, language, indicators, mode = 'submit' }
 
     result.verdict = 'AC'
     const limit = memoryLimit(indicators, question.memoryLimitBytes)
-    const inputs = mode === 'sample' ? cases.slice(0, 1) : cases
+    const inputs = mode === 'sample' ? question.cases.slice(0, 1) : question.cases
     for (const [index, item] of inputs.entries()) {
       const run = await sandbox({
         args: runtime.run,
@@ -119,20 +124,15 @@ export async function evaluate({ source, language, indicators, mode = 'submit' }
         memoryLimit: question.memoryLimitBytes,
         files: [{ content: item.input }, { name: 'stdout', max: 4096 }, { name: 'stderr', max: 4096 }],
       })
-      const verdict =
-        run.memory > limit
-          ? 'MLE'
-          : run.status === 'Accepted'
-            ? run.files.stdout.trim() === item.answer
-              ? 'AC'
-              : 'WA'
-            : statusCodes[run.status] || 'ERROR'
-      result.timeMs = Math.max(result.timeMs, run.time / 1e6)
+      const verdict = caseVerdict(run, item.answer, limit)
+      const timeMs = run.time / 1e6
+      result.timeMs = Math.max(result.timeMs, timeMs)
       result.memoryBytes = Math.max(result.memoryBytes, run.memory)
-      result.cases.push({ number: index + 1, verdict, timeMs: run.time / 1e6, memoryBytes: run.memory })
+      result.cases.push({ number: index + 1, verdict, timeMs, memoryBytes: run.memory })
       if (verdict !== 'AC') {
         result.verdict = verdict
-        result.message = run.files?.stderr || run.error || `第 ${index + 1} 组数据：${verdict}`
+        const diagnostic = mode === 'sample' && (run.files?.stderr || run.error)
+        result.message = diagnostic || `第 ${index + 1} 组数据：${verdict}`
         break
       }
     }

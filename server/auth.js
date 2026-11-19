@@ -9,10 +9,7 @@ const loginCookie = 'pioneer_oidc'
 
 export function authConfig(env = process.env) {
   const values = [env.OIDC_ISSUER, env.OIDC_CLIENT_ID, env.OIDC_CLIENT_SECRET, env.OIDC_REDIRECT_URL]
-  if (!values.some(Boolean)) {
-    if (env.AUTH_API_URL) throw new Error('AUTH_API_URL 已停用，请配置 OIDC_* 统一认证参数')
-    return null
-  }
+  if (!values.some(Boolean) && env.ALLOW_GUEST === '1' && env.NODE_ENV !== 'production') return null
   if (!values.every(Boolean))
     throw new Error('OIDC_ISSUER、OIDC_CLIENT_ID、OIDC_CLIENT_SECRET、OIDC_REDIRECT_URL 必须全部配置')
   const issuer = new URL(env.OIDC_ISSUER)
@@ -41,6 +38,7 @@ export function createAuth(config, { discover = oidc.discovery, now = Date.now }
   const available = Boolean(config)
   const cookieOptions = { httpOnly: true, secure: available, sameSite: config?.sameSite || 'lax', path: '/' }
   let configuration
+  let nextPrune = 0
   function provider() {
     configuration ||= discover(new URL(config.issuer), config.clientId, config.clientSecret, undefined, {
       timeout: 10,
@@ -62,14 +60,16 @@ export function createAuth(config, { discover = oidc.discovery, now = Date.now }
       .find((part) => part.startsWith(`${name}=`))
       ?.slice(name.length + 1)
   }
-  function prune() {
-    for (const map of [pending, sessions])
-      for (const [id, item] of map) if (item.expiresAt <= now()) map.delete(id)
-  }
   function authenticate(req, _res, next) {
-    prune()
+    const at = now()
+    if (at >= nextPrune) {
+      for (const map of [pending, sessions])
+        for (const [id, item] of map) if (item.expiresAt <= at) map.delete(id)
+      nextPrune = at + loginAge
+    }
     req.sid = cookie(req, sessionCookie)
-    req.user = sessions.get(req.sid)?.user || null
+    const session = sessions.get(req.sid)
+    req.user = session && at < session.expiresAt ? session.user : null
     next()
   }
   function requireUser(req, res, next) {

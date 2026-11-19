@@ -4,7 +4,7 @@
 
 ## 认证与后端
 
-先运行 `sudo install -d -m 755 /etc/pioneer`。在 Keycloak 注册独立客户端，可参考 [客户端模板](../deploy/keycloak-client.json)。按 [统一认证说明](../README.md#网协统一认证) 配置 `/etc/pioneer/api.env`，权限为 `600`，并设置 `HOST=127.0.0.1` 和 `DATA_DIR=/var/lib/pioneer`。在第一次启动生产 API 前完成配置，不使用开发访客模式。
+先运行 `sudo install -d -m 755 /etc/pioneer`。在 Keycloak 注册独立客户端，可参考 [客户端模板](../deploy/keycloak-client.json)。按 [统一认证说明](../README.md#网协统一认证) 配置 `/etc/pioneer/api.env`，权限为 `600`。服务默认监听 `127.0.0.1:3001`，数据目录为 `/var/lib/pioneer`。安装脚本在启动服务前检查 OIDC 配置，生产服务禁用访客模式。
 
 上传 `server/` 和 `shared/` 到同一目录，执行：
 
@@ -29,9 +29,10 @@ pnpm install --frozen-lockfile
 pnpm build
 ```
 
-上传 `dist/` 和 `deploy/oj.nginx.conf`。在 OJ 机器上安装 Nginx 和 rsync，然后执行：
+上传完整的 `dist/` 和 `deploy/oj.nginx.conf`。在 Debian 13 的 OJ 机器上执行：
 
 ```sh
+sudo apt-get install -y nginx libnginx-mod-http-brotli-static rsync
 sudo install -d -m 755 /var/www/coding-contract
 sudo rsync -a --delete dist/ /var/www/coding-contract/
 sudo install -m 644 deploy/oj.nginx.conf /etc/nginx/sites-available/coding-contract
@@ -41,12 +42,12 @@ sudo systemctl enable --now nginx
 sudo systemctl reload nginx
 ```
 
-保留 `.mjs` 的 JavaScript MIME 类型规则，C/C++ 语言服务需要动态导入 `clangd-runtime.mjs`。配置同时提供 gzip、协商缓存和 SPA 路由回退；缺失的脚本或 WASM 资源返回 404，不回退到 HTML。固定文件名的资源不使用长期 immutable 缓存。
+构建会为语言服务资源生成 `.br` 和 `.gz` 副本。Nginx 按浏览器支持的编码返回 Brotli、gzip 或原文件，保留原 URL 和 MIME 类型。
 
 ## 验证与更新
 
 确认 `nginx`、`pioneer-api`、`go-judge` 都处于 active 状态。浏览器完成统一登录后，`/api/session` 应返回当前用户；未登录的作战和记录 API 应返回 401。退出只清除本应用会话。
 
-`server/install.sh` 会运行全部语言的样例自检。评测边界与异常判定可使用 `JUDGE_INTEGRATION=1 node --test tests/judge.test.js` 验证。原 `tests/deployment.test.js` 针对本地访客模式，不应直接用于开启 OIDC 的生产实例。
+`server/install.sh` 会运行全部语言的样例自检。真实沙箱和部署端点的验证命令见[开发说明](development.md#验证)。
 
-更新后端时重跑安装脚本，保留 `/etc/pioneer/api.env` 和 `/var/lib/pioneer/`；更新前端时重新构建并替换静态产物。浏览器语言服务的缓存策略或响应元数据变化时，同时更新 `vite.config.js` 中的缓存版本。
+更新后端时重跑安装脚本，保留 `/etc/pioneer/api.env` 和 `/var/lib/pioneer/`。更新前端时重新构建并替换静态产物。浏览器分别缓存 C/C++、Python 和 JS/TS 的语言服务资源。

@@ -40,6 +40,7 @@ import 'monaco-editor/languages/definitions/python/register.js'
 import 'monaco-editor/languages/definitions/java/register.js'
 import 'monaco-editor/languages/definitions/javascript/register.js'
 import 'monaco-editor/languages/definitions/typescript/register.js'
+import { createWorker as createTypeScriptWorker } from '../lsp/typescript.js'
 import 'monaco-editor/languages/definitions/go/register.js'
 import 'monaco-editor/languages/definitions/rust/register.js'
 import 'monaco-editor/languages/definitions/csharp/register.js'
@@ -56,10 +57,13 @@ registerLanguage({ id: 'javascript-basic', loader: () => import('monaco-editor/l
 registerLanguage({ id: 'typescript-basic', loader: () => import('monaco-editor/languages/definitions/typescript/typescript.js') })
 const basicModes = { javascript: 'javascript-basic', typescript: 'typescript-basic' }
 
-const silenced = { hover: { enabled: false }, parameterHints: { enabled: false }, 'semanticHighlighting.enabled': false }
+const silenced = {
+  hover: { enabled: false }, parameterHints: { enabled: false }, 'semanticHighlighting.enabled': false,
+  wordBasedSuggestions: 'off',
+}
 const bare = {
   ...silenced,
-  quickSuggestions: false, suggestOnTriggerCharacters: false, wordBasedSuggestions: 'off', snippetSuggestions: 'none', tabCompletion: 'off',
+  quickSuggestions: false, suggestOnTriggerCharacters: false, snippetSuggestions: 'none', tabCompletion: 'off',
   bracketPairColorization: { enabled: false }, guides: { bracketPairs: false, indentation: false },
   matchBrackets: 'never', occurrencesHighlight: 'off', selectionHighlight: false, links: false,
   folding: false, stickyScroll: { enabled: false }, renderLineHighlight: 'none', renderWhitespace: 'none',
@@ -72,7 +76,7 @@ const masks = [{}, silenced, bare]
 self.MonacoEnvironment = {
   getWorker: (_, label) =>
     label === 'typescript' || label === 'javascript'
-      ? import('../lsp/typescript.js').then((module) => module.createWorker())
+      ? createTypeScriptWorker()
       : new EditorWorker(),
 }
 monaco.editor.defineTheme('pioneer', {

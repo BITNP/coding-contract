@@ -1,14 +1,11 @@
 import assert from 'node:assert/strict'
 import { createHash, generateKeyPairSync, sign } from 'node:crypto'
-import { once } from 'node:events'
-import { spawn } from 'node:child_process'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { test } from 'node:test'
 import express from 'express'
 import * as oidc from 'openid-client'
 import { authConfig, createAuth } from '../auth.js'
+import { createAdminRouter } from '../admin.js'
+import { listen, startApi } from './http.js'
 
 const config = {
   issuer: 'https://issuer.test',
@@ -18,16 +15,16 @@ const config = {
   publicUrl: 'https://oj.test/',
   sameSite: 'lax',
 }
+const oidcEnv = {
+  OIDC_ISSUER: config.issuer,
+  OIDC_CLIENT_ID: config.clientId,
+  OIDC_CLIENT_SECRET: config.clientSecret,
+  OIDC_REDIRECT_URL: config.redirectUrl,
+}
 const keys = generateKeyPairSync('rsa', { modulusLength: 2048 })
 const otherKeys = generateKeyPairSync('rsa', { modulusLength: 2048 })
 const jwk = { ...keys.publicKey.export({ format: 'jwk' }), kid: 'test', alg: 'RS256', use: 'sig' }
 
-async function listen(t, app) {
-  const server = app.listen(0, '127.0.0.1')
-  await once(server, 'listening')
-  t.after(() => new Promise((resolve) => server.close(resolve)))
-  return `http://127.0.0.1:${server.address().port}`
-}
 function signedToken(claims, key = keys.privateKey) {
   const header = Buffer.from(JSON.stringify({ alg: 'RS256', kid: 'test' })).toString('base64url')
   const body = Buffer.from(JSON.stringify(claims)).toString('base64url')
@@ -106,6 +103,8 @@ async function fixture(t) {
   const app = express()
   app.use(auth.authenticate)
   app.use('/api/auth', auth.router)
+  const db = { prepare: () => ({ all: () => [] }) }
+  app.use('/api/admin', createAdminRouter({ db, auth, admins: 'alice' }))
   app.get('/api/session', (req, res) => res.json({ user: req.user, authAvailable: auth.available }))
   app.get('/private', auth.requireUser, (req, res) => res.json({ owner: req.user.id }))
   const base = await listen(t, app)
@@ -146,19 +145,29 @@ async function fixture(t) {
   }
 }
 
-test('OIDC 配置缺项、旧登录配置和不安全地址不会静默退回访客模式', () => {
-  assert.equal(authConfig({}), null)
-  assert.throws(() => authConfig({ OIDC_ISSUER: config.issuer }), /必须全部配置/)
-  assert.throws(() => authConfig({ AUTH_API_URL: 'https://old.test' }), /已停用/)
-  const env = {
-    OIDC_ISSUER: config.issuer,
-    OIDC_CLIENT_ID: config.clientId,
-    OIDC_CLIENT_SECRET: config.clientSecret,
-    OIDC_REDIRECT_URL: config.redirectUrl,
+test('访客模式需要显式开启，生产环境和部分 OIDC 配置要求完整认证', () => {
+  assert.throws(() => authConfig({}), /必须全部配置/)
+  assert.equal(authConfig({ ALLOW_GUEST: '1' }), null)
+  assert.throws(() => authConfig({ NODE_ENV: 'production', ALLOW_GUEST: '1' }), /必须全部配置/)
+  assert.throws(() => authConfig({ ALLOW_GUEST: '1', OIDC_ISSUER: config.issuer }), /必须全部配置/)
+  assert.equal(authConfig(oidcEnv).publicUrl, config.publicUrl)
+  assert.equal(authConfig({ ...oidcEnv, ALLOW_GUEST: '1' }).clientId, config.clientId)
+  assert.throws(() => authConfig({ ...oidcEnv, OIDC_REDIRECT_URL: 'http://oj.test/callback' }), /HTTPS/)
+  assert.throws(() => authConfig({ ...oidcEnv, COOKIE_SAME_SITE: 'strict' }), /SameSite/)
+})
+
+test('管理台按登录用户的 sub 授权', async (t) => {
+  const f = await fixture(t)
+  const url = `${f.base}/api/admin/operations`
+  assert.equal((await fetch(url)).status, 401)
+  for (const [subject, expected] of [
+    ['alice', 200],
+    ['bob', 403],
+  ]) {
+    const response = await f.callback(await f.begin({ subject, claims: { name: 'alice' } }))
+    const session = cookie(response, 'pioneer_session')
+    assert.equal((await fetch(url, { headers: { cookie: session } })).status, expected)
   }
-  assert.equal(authConfig(env).publicUrl, config.publicUrl)
-  assert.throws(() => authConfig({ ...env, OIDC_REDIRECT_URL: 'http://oj.test/callback' }), /HTTPS/)
-  assert.throws(() => authConfig({ ...env, COOKIE_SAME_SITE: 'strict' }), /SameSite/)
 })
 
 test('真实授权码交换、PKCE、签名校验、个人身份、退出及会话过期', async (t) => {
@@ -194,7 +203,12 @@ test('真实授权码交换、PKCE、签名校验、个人身份、退出及会�
     200,
   )
   assert.equal((await fetch(`${f.base}/private`, { headers: { cookie: session } })).status, 401)
-  f.advance(24 * 60 * 60 * 1000 + 1)
+  f.advance(24 * 60 * 60 * 1000 - 1)
+  assert.equal(
+    (await fetch(`${f.base}/private`, { headers: { cookie: cookie(bob, 'pioneer_session') } })).status,
+    200,
+  )
+  f.advance(1)
   assert.equal(
     (await fetch(`${f.base}/private`, { headers: { cookie: cookie(bob, 'pioneer_session') } })).status,
     401,
@@ -244,45 +258,7 @@ test('登录返回地址不能跳到外部站点', async (t) => {
 })
 
 test('实际 API 启用 OIDC 后，未登录无法创建、读取、校验或提交作战记录', async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), 'pioneer-auth-test-'))
-  const child = spawn(process.execPath, ['index.js'], {
-    cwd: new URL('../', import.meta.url),
-    env: {
-      ...process.env,
-      DATA_DIR: dir,
-      HOST: '127.0.0.1',
-      PORT: '0',
-      OIDC_ISSUER: config.issuer,
-      OIDC_CLIENT_ID: config.clientId,
-      OIDC_CLIENT_SECRET: config.clientSecret,
-      OIDC_REDIRECT_URL: config.redirectUrl,
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
-  t.after(async () => {
-    child.kill()
-    if (child.exitCode === null) await once(child, 'exit')
-    await rm(dir, { recursive: true, force: true })
-  })
-  let output = ''
-  const base = await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('API startup timed out: ' + output)), 10000)
-    child.stdout.on('data', (chunk) => {
-      output += chunk
-      const match = /API: (http:\/\/127\.0\.0\.1:\d+)/.exec(output)
-      if (match) {
-        clearTimeout(timer)
-        resolve(match[1])
-      }
-    })
-    child.stderr.on('data', (chunk) => {
-      output += chunk
-    })
-    child.once('exit', () => {
-      clearTimeout(timer)
-      reject(new Error(output))
-    })
-  })
+  const { base } = await startApi(t, oidcEnv)
   assert.deepEqual(await (await fetch(`${base}/api/session`)).json(), { user: null, authAvailable: true })
   for (const [path, method] of [
     ['/api/records/best', 'GET'],

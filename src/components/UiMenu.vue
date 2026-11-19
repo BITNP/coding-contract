@@ -13,9 +13,14 @@ const open = ref(false)
 const anchor = ref(null)
 const tuck = ref(20)
 
-function toggle() {
+let trigger = null
+function toggle(event) {
+  trigger = event?.currentTarget
   tuck.value = anchor.value.offsetHeight / 2
   open.value = !open.value
+}
+function clickoutside(event) {
+  if (!trigger?.contains(event.target)) open.value = false
 }
 function select(key) {
   open.value = false
@@ -35,7 +40,7 @@ function select(key) {
     scrollable
     :menu-props="() => ({ class: 'ui-menu', style: { '--tuck': `${tuck}px`, maxHeight } })"
     @select="select"
-    @clickoutside="open = false"
+    @clickoutside="clickoutside"
   >
     <div ref="anchor" class="menu-anchor" :class="{ open }">
       <slot :toggle="toggle" />
@@ -52,6 +57,12 @@ function select(key) {
 }
 .menu-anchor.open {
   filter: drop-shadow(0 4px 10px #0006);
+}
+.menu-chevron {
+  transition: transform 0.15s;
+}
+.menu-anchor.open .menu-chevron {
+  transform: rotate(180deg);
 }
 .ui-menu.n-dropdown-menu {
   margin: calc(var(--tuck) * -1) 0 0 !important;

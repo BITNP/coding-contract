@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { cases, question } from '../server/question.js'
+import question from '../server/questions/max-subarray.js'
 import { languages } from '../shared/languages.js'
 
+const { cases } = question
 const valuesOf = ({ input }) => input.trim().split(/\s+/).map(Number).slice(1)
 function brute(values) {
   let best = -Infinity
@@ -16,10 +17,10 @@ function brute(values) {
   return best
 }
 
-test('新题模板覆盖所有语言，均可参与 1024 字节合约', () => {
+test('参考解覆盖所有语言，均可参与 1024 字节合约', () => {
   assert.equal(question.id, 'max-subarray')
-  assert.deepEqual(Object.keys(question.templates).sort(), languages.map(({ id }) => id).sort())
-  for (const [id, source] of Object.entries(question.templates)) {
+  assert.deepEqual(Object.keys(question.solutions).sort(), languages.map(({ id }) => id).sort())
+  for (const [id, source] of Object.entries(question.solutions)) {
     assert.ok(Buffer.byteLength(source) <= 1024, id)
   }
 })

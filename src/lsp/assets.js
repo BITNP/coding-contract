@@ -1,36 +1,34 @@
-const CACHE = `pioneer-lsp-${__LSP_VERSION__}`
 const partial = new Map()
 let pending = Promise.resolve()
 
-const openCache = () => (self.caches ? caches.open(CACHE).catch(() => null) : Promise.resolve(null))
+export function activeAssetCache(service) {
+  const controller = navigator.serviceWorker?.controller
+  return controller && new URL(controller.scriptURL).searchParams.get(service)
+}
 
-export function registerAssetCache() {
-  if (!navigator.serviceWorker) return Promise.resolve()
-  return navigator.serviceWorker
-    .register(`/sw.js?v=${encodeURIComponent(__LSP_VERSION__)}`)
-    .then(async (registration) => {
-      const worker = registration.installing || registration.waiting || registration.active
-      let timer
-      let stopWaiting = () => {}
-      const activated = new Promise((resolve) => {
-        if (!worker || worker.state === 'activated' || worker.state === 'redundant') return resolve()
-        const onStateChange = () => {
-          if (worker.state === 'activated' || worker.state === 'redundant') resolve()
-        }
-        worker.addEventListener('statechange', onStateChange)
-        stopWaiting = () => worker.removeEventListener('statechange', onStateChange)
-      })
-      try {
-        await Promise.race([
-          activated.then(() => navigator.serviceWorker.ready),
-          new Promise((resolve) => { timer = setTimeout(resolve, 3000) }),
-        ])
-      } finally {
+export async function registerAssetCache(cacheNames) {
+  const workers = navigator.serviceWorker
+  if (!workers) return false
+  const url = new URL('/sw.js', location.href)
+  url.search = new URLSearchParams(cacheNames).toString()
+  try {
+    await workers.register(url.href, { type: 'module', updateViaCache: 'none' })
+    if (workers.controller?.scriptURL === url.href) return true
+    return await new Promise((resolve) => {
+      function finish(ready) {
         clearTimeout(timer)
-        stopWaiting()
+        workers.removeEventListener('controllerchange', changed)
+        resolve(ready)
       }
+      function changed() {
+        if (workers.controller?.scriptURL === url.href) finish(true)
+      }
+      const timer = setTimeout(() => finish(false), 3000)
+      workers.addEventListener('controllerchange', changed)
     })
-    .catch(() => {})
+  } catch {
+    return false
+  }
 }
 
 function validator(response) {
@@ -40,17 +38,32 @@ function validator(response) {
 
 async function download(asset, cache, report, signal) {
   signal.throwIfAborted()
-  if (await cache?.match(asset.url)) return report(asset, asset.size || 1, asset.size || 1)
-  const part = partial.get(asset.url) ?? { chunks: [], loaded: 0 }
-  partial.set(asset.url, part)
-  const resume =
-    part.loaded && part.validator ? { range: `bytes=${part.loaded}-`, 'if-range': part.validator } : {}
+  if (await cache.match(asset.url)) return report(asset, asset.size || 1, asset.size || 1)
+  const previous = partial.get(asset.url)
+  const resume = previous?.loaded ? { range: `bytes=${previous.loaded}-`, 'if-range': previous.validator } : {}
   const response = await fetch(asset.url, { signal, cache: 'no-cache', headers: resume })
+  const encoding = response.headers.get('content-encoding')
+  const encoded = encoding && encoding !== 'identity'
+  const version = encoded ? null : validator(response)
+  const ranged = response.status === 206
+  const range = ranged && response.headers.get('content-range')?.match(/^bytes (\d+)-(\d+)\/(\d+)$/i)
+  const rangeSize = range && Number(range[3])
+  if (ranged || response.status === 416) {
+    const complete =
+      range && previous && Number(range[1]) === previous.loaded &&
+      previous.loaded < rangeSize && Number(range[2]) + 1 === rangeSize
+    if (encoded || !complete || (version && version !== previous.validator)) {
+      await response.body?.cancel()
+      if (!partial.delete(asset.url)) throw new Error(`无效的资源区间：${asset.url}`)
+      return download(asset, cache, report, signal)
+    }
+  }
   if (!response.ok) throw new Error(`${new URL(asset.url).pathname}: HTTP ${response.status}`)
-  if (response.status !== 206) Object.assign(part, { chunks: [], loaded: 0 })
-  part.validator = validator(response)
-  const length = !response.headers.get('content-encoding') && Number(response.headers.get('content-length'))
-  const total = asset.size || (length && part.loaded + length) || 0
+  const part = ranged ? previous : { chunks: [], loaded: 0, validator: version }
+  if (part.validator) partial.set(asset.url, part)
+  else partial.delete(asset.url)
+  const length = !encoded && Number(response.headers.get('content-length'))
+  const total = rangeSize || asset.size || (length && part.loaded + length) || 0
   const reader = response.body.getReader()
   for (;;) {
     const { done, value } = await reader.read()
@@ -59,24 +72,26 @@ async function download(asset, cache, report, signal) {
     part.loaded += value.length
     report(asset, part.loaded, total)
   }
+  partial.delete(asset.url)
+  if (ranged && part.loaded !== rangeSize) return download(asset, cache, report, signal)
   report(asset, part.loaded, part.loaded)
   const headers = { 'content-type': response.headers.get('content-type') || 'application/octet-stream' }
-  partial.delete(asset.url)
   try {
-    await cache?.put(asset.url, new Response(new Blob(part.chunks), { headers }))
+    await cache.put(asset.url, new Response(new Blob(part.chunks), { headers }))
   } catch {
     // 缓存配额不足时仍可通过网络启动服务。
   }
 }
 
-export function fetchAssets(assets, onProgress, signal) {
-  pending = pending.catch(() => {}).then(() => downloadAssets(assets, onProgress, signal))
+export function fetchAssets(cacheName, assets, onProgress, signal) {
+  pending = pending.catch(() => {}).then(() => downloadAssets(cacheName, assets, onProgress, signal))
   return pending
 }
 
-async function downloadAssets(assets, onProgress, signal) {
+async function downloadAssets(cacheName, assets, onProgress, signal) {
   signal.throwIfAborted()
-  const cache = await openCache()
+  const cache = await self.caches?.open(cacheName).catch(() => null)
+  if (!cache) return onProgress(1)
   const state = new Map(assets.map((asset) => [asset, { loaded: 0, total: asset.size || 0 }]))
   const report = (asset, loaded, total) => {
     state.set(asset, { loaded, total: Math.max(total, loaded) })

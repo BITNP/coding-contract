@@ -1,19 +1,17 @@
 <script setup>
-import { computed } from 'vue'
 import { Check, Ban } from 'lucide-vue-next'
 import keyIcon from '../assets/material-symbols/key.svg?inline'
 import lockIcon from '../assets/game-ui/lock.webp?inline'
-import { indicatorStates, toggle } from '../state.js'
 import IndicatorPopover from './IndicatorPopover.vue'
 import Halftone from './Halftone.vue'
-const props = defineProps({ item: Object })
-const state = computed(() => props.item && indicatorStates.value[props.item.id])
+defineProps({ item: Object, state: Object })
+const emit = defineEmits(['toggle'])
 const iconMask = icon => ({ maskImage: `url("${icon}")` })
 </script>
 
 <template>
   <IndicatorPopover v-if="item" :item="item">
-      <button class="indicator" :class="{ selected: state.selected, conflict: state.conflict, locked: state.locked, 'key-card': item.key }" :aria-label="`${item.name}，${item.level}级${state.selected ? '，已选中' : ''}`" :aria-pressed="state.selected" :aria-disabled="state.locked" @click="toggle(item)">
+      <button class="indicator" :class="{ selected: state.selected, conflict: state.conflict, locked: state.locked, 'key-card': item.key }" :aria-label="`${item.name}，${item.level}级${state.selected ? '，已选中' : ''}`" :aria-pressed="state.selected" :aria-disabled="state.locked" @click="state.locked || emit('toggle', item)">
         <span v-if="!item.locked && !item.key" class="reward-mark"><img src="/assets/first-clear.webp" alt="" /></span>
         <span v-if="state.selected" class="selected-check"><Check :size="20" :stroke-width="4" /></span>
         <Halftone v-if="state.selected" class="card-halftone" color="#3d0006" :cell="4" :angle="135" :from="0.3" />
@@ -49,7 +47,7 @@ const iconMask = icon => ({ maskImage: `url("${icon}")` })
 .conflict .indicator-icon { opacity: .37 }
 .conflict-mask { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; background: linear-gradient(#ffffff27, #0008); font-size: clamp(15px, 1.05vw, 18px); font-weight: 400; letter-spacing: .04em; text-indent: .04em; pointer-events: none }
 .conflict-mask svg { filter: drop-shadow(0 0 5px #e5356366) }
-.empty-indicator { background: #1a1b1c; border-color: transparent; pointer-events: none }
+.empty-indicator { background: #1a1b1c; border-color: transparent; pointer-events: none; z-index: 0 }
 .empty-indicator .card-corner { opacity: .18 }
 .empty-cross { width: 44%; aspect-ratio: 1; background: linear-gradient(45deg, transparent calc(50% - 1px), #343637 calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)), linear-gradient(-45deg, transparent calc(50% - 1px), #343637 calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)) }
 .key-card .indicator-icon { filter: brightness(0) saturate(100%) invert(74%) sepia(93%) saturate(1406%) hue-rotate(358deg) }

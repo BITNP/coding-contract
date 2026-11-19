@@ -3,7 +3,13 @@ import { connect } from './client.js'
 
 const workspace = { uri: 'file:///workspace/', name: 'workspace' }
 const initializationOptions = {
-  files: { '/workspace/pyrightconfig.json': JSON.stringify({ typeCheckingMode: 'standard' }) },
+  files: {
+    '/workspace/pyrightconfig.json': JSON.stringify({
+      pythonVersion: '3.13',
+      pythonPlatform: 'Linux',
+      typeCheckingMode: 'standard',
+    }),
+  },
   disablePullDiagnostics: true,
 }
 
@@ -42,20 +48,10 @@ function languageServerPort(worker) {
 }
 
 export default {
-  name: 'basedpyright',
+  cache: 'python',
   assets: () => [{ url: new URL(workerUrl, location.href).href, size: 17982887 }],
   async start(_model, _language, signal) {
     const workers = boot()
-    let client
-    try {
-      client = await connect(languageServerPort(workers[0]), signal)
-    } catch (error) {
-      workers.forEach((worker) => worker.terminate())
-      throw error
-    }
-    return () => {
-      client.dispose()
-      workers.forEach((worker) => worker.terminate())
-    }
+    return connect(languageServerPort(workers[0]), signal, () => workers.forEach((worker) => worker.terminate()))
   },
 }

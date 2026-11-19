@@ -3,6 +3,11 @@ set -eu
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 source_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
+if [ ! -f /etc/pioneer/api.env ]; then
+  echo '请先配置 /etc/pioneer/api.env 中的 OIDC 参数，再运行安装脚本。' >&2
+  exit 1
+fi
+
 sh "$source_root/server/provision.sh"
 
 tools=/opt/pioneer/tools
@@ -49,20 +54,18 @@ fi
 rsync -a --delete --exclude node_modules --exclude data --exclude .env "$source_root/server/" "$app/server/"
 rsync -a --delete "$source_root/shared/" "$app/shared/"
 CI=true pnpm --dir "$app/server" --ignore-workspace install --prod --frozen-lockfile --store-dir "$tools/pnpm-store"
+api_url=$(cd "$app/server" && node --input-type=module -e '
+  import { readFileSync } from "node:fs"
+  import { parseEnv } from "node:util"
+  import { authConfig } from "./auth.js"
+  const env = parseEnv(readFileSync("/etc/pioneer/api.env", "utf8"))
+  authConfig({ ...env, NODE_ENV: "production" })
+  const host = env.HOST === "0.0.0.0" ? "127.0.0.1" : env.HOST || "127.0.0.1"
+  console.log(`http://${host}:${env.PORT || 3001}`)
+')
 JUDGE_URL=http://127.0.0.1:5050 node "$app/server/self-test.js"
 
 id pioneer >/dev/null 2>&1 || useradd --system --home-dir /var/lib/pioneer --no-create-home --shell /usr/sbin/nologin pioneer
-if [ ! -f /etc/pioneer/api.env ]; then
-  cat > /etc/pioneer/api.env <<'EOF'
-HOST=0.0.0.0
-PORT=3001
-DATA_DIR=/var/lib/pioneer
-JUDGE_URL=http://127.0.0.1:5050
-CORS_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
-COOKIE_SAME_SITE=lax
-EOF
-  chmod 600 /etc/pioneer/api.env
-fi
 
 cat > /etc/systemd/system/pioneer-api.service <<'EOF'
 [Unit]
@@ -74,7 +77,9 @@ Wants=go-judge.service
 User=pioneer
 Group=pioneer
 WorkingDirectory=/opt/pioneer/app/server
+Environment=NODE_ENV=production HOST=127.0.0.1 DATA_DIR=/var/lib/pioneer
 EnvironmentFile=/etc/pioneer/api.env
+UnsetEnvironment=ALLOW_GUEST
 ExecStart=/opt/pioneer/tools/node/bin/node /opt/pioneer/app/server/index.js
 StateDirectory=pioneer
 Restart=on-failure
@@ -88,13 +93,6 @@ systemctl daemon-reload
 systemctl enable pioneer-api
 systemctl restart pioneer-api
 systemctl is-active --quiet pioneer-api
-api_url=$(node --input-type=module -e '
-  import { readFileSync } from "node:fs"
-  import { parseEnv } from "node:util"
-  const env = parseEnv(readFileSync("/etc/pioneer/api.env", "utf8"))
-  const host = !env.HOST || env.HOST === "0.0.0.0" ? "127.0.0.1" : env.HOST
-  console.log(`http://${host}:${env.PORT || 3001}`)
-')
 
 curl --retry 10 --retry-connrefused --retry-delay 1 -fs "$api_url/api/session" >/dev/null || {
   systemctl status pioneer-api --no-pager >&2

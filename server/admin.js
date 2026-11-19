@@ -1,7 +1,7 @@
 import { Router } from 'express'
-import { contractById, submitGraceMs } from '../shared/contracts.js'
+import { flaggedActivity } from '../shared/labels.js'
+import { currentRound, roundSummary } from './operations.js'
 
-const flagged = ['fullscreen-exit', 'hidden', 'blur', 'paste', 'devtools']
 const window24h = 24 * 60 * 60 * 1000
 
 function awayMs(events) {
@@ -18,7 +18,7 @@ function awayMs(events) {
   return total
 }
 
-export function createAdminRouter({ db, auth, question, admins = process.env.ADMIN_USERS }) {
+export function createAdminRouter({ db, auth, admins = process.env.ADMIN_USERS }) {
   const allowed = new Set(
     (admins || '')
       .split(',')
@@ -27,80 +27,63 @@ export function createAdminRouter({ db, auth, question, admins = process.env.ADM
   )
   const router = Router()
   const recent = db.prepare(
-    `SELECT user_id, data FROM operations
-     WHERE json_extract(data, '$.createdAt') >= ?1 OR json_extract(data, '$.seenAt') >= ?1
-     ORDER BY json_extract(data, '$.createdAt') DESC`,
+    `SELECT data FROM operations WHERE created_at >= ? AND (? OR finished_at IS NULL)
+     ORDER BY created_at DESC`,
   )
-  const byId = db.prepare('SELECT user_id, data FROM operations WHERE id = ?')
+  const byId = db.prepare('SELECT data FROM operations WHERE id = ?')
 
   router.use((req, res, next) => {
     if (!auth.available) return next()
     if (!req.user) return res.status(401).json({ message: '请先统一登录' })
-    if (!allowed.has(req.user.id) && !allowed.has(req.user.name))
-      return res.status(403).json({ message: '无管理权限' })
+    if (!allowed.has(req.user.id)) return res.status(403).json({ message: '无管理权限' })
     next()
   })
 
-  function summarize(operation, owner, now) {
-    const events = operation.events || []
-    const seen = Date.parse(operation.seenAt) || 0
-    const deadline = Date.parse(operation.deadline)
-    const flags = Object.fromEntries(flagged.map((type) => [type, 0]))
+  function summarize(operation, now, detail = false) {
+    const { events } = operation
+    const flags = Object.fromEntries(flaggedActivity.map((type) => [type, 0]))
     for (const event of events) if (Object.hasOwn(flags, event.type)) flags[event.type]++
-    const { submission } = operation
+    const submission = operation.rounds.findLast((round) => round.submission)?.submission
     return {
       id: operation.id,
-      user: {
-        id: operation.user?.id || owner,
-        name: operation.user?.name || owner,
-        avatar: operation.user?.avatar || null,
-      },
+      user: operation.user,
       createdAt: operation.createdAt,
-      deadline: operation.deadline || null,
-      seenAt: operation.seenAt || null,
-      online: now - seen < 60_000,
-      running: deadline ? now <= deadline + submitGraceMs : now - seen < 120_000,
-      question: question.title,
-      language: operation.language,
-      contracts: operation.question.contracts
-        .filter((id) => Object.hasOwn(contractById, id))
-        .map((id) => ({ id, name: contractById[id].name, points: contractById[id].points })),
-      score: operation.question.score,
+      deadline: operation.deadline,
+      seenAt: operation.seenAt,
+      online: now - Date.parse(operation.seenAt) < 60_000,
+      running: !operation.finishedAt,
+      current: operation.current,
+      rounds: roundSummary(operation),
+      language: currentRound(operation).language,
+      score: operation.total,
       submission: submission
         ? {
-            verdict: submission.result?.verdict,
-            score: submission.result?.score,
-            maxScore: submission.result?.maxScore,
+            verdict: submission.result.verdict,
+            score: submission.result.score,
+            maxScore: submission.result.maxScore,
             language: submission.language,
             submittedAt: submission.submittedAt,
+            ...(detail && { source: submission.source }),
           }
         : null,
       flags,
       awayMs: awayMs(events),
-      live: operation.live || null,
+      ...(detail && { events, live: operation.live }),
     }
   }
 
   router.get('/operations', (req, res) => {
     const now = Date.now()
-    const since = now - window24h
     const operations = recent
-      .all(new Date(since).toISOString())
-      .map((row) => summarize(JSON.parse(row.data), row.user_id, now))
-      .filter((item) => item.running || (req.query.all === '1' && Date.parse(item.createdAt) >= since))
+      .all(new Date(now - window24h).toISOString(), Number(req.query.all === '1'))
+      .map((row) => summarize(JSON.parse(row.data), now))
     res.json({ serverTime: now, operations })
   })
 
   router.get('/operations/:id', (req, res) => {
     const row = byId.get(req.params.id)
     if (!row) return res.status(404).json({ message: '未找到这次作战' })
-    const operation = JSON.parse(row.data)
-    const item = summarize(operation, row.user_id, Date.now())
-    res.json({
-      ...item,
-      events: operation.events || [],
-      submission: item.submission && { ...item.submission, source: operation.submission.source },
-    })
+    res.json(summarize(JSON.parse(row.data), Date.now(), true))
   })
 
   return router

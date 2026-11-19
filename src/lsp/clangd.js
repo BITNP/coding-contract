@@ -10,7 +10,7 @@ const asset = (name, size) => ({
 const standards = { c: ['-xc', '-std=c17'], cpp: ['-std=c++17'] }
 
 export default {
-  name: 'clangd',
+  cache: 'clangd',
   supported: isClangdWasmSupported,
   assets: () => [
     asset('clangd-runtime.mjs', 423830),
@@ -24,16 +24,6 @@ export default {
       compilerArguments: standards[language],
       signal,
     })
-    let client
-    try {
-      client = await connect(session.port, signal)
-    } catch (error) {
-      session.dispose()
-      throw error
-    }
-    return () => {
-      client.dispose()
-      session.dispose()
-    }
+    return connect(session.port, signal, () => session.dispose())
   },
 }

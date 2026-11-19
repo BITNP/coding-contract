@@ -1,16 +1,28 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { evaluate } from '../server/judge.js'
-import { question, cases } from '../server/question.js'
+import question from '../server/questions/max-subarray.js'
 import { checksFor, contractById } from '../shared/contracts.js'
+import { checkContracts } from '../shared/checks.js'
 
-test('内存档位使用十进制字节数，订书钉保留 ID 并降为一分', () => {
+const { cases } = question
+
+test('跨过预算一个内存页时显示精确字节，沙箱自身的超限单独说明', () => {
+  const message = (facts) => checkContracts(['memory-3'], facts, '')[0].messages[0]
+  assert.equal(message({ memoryBytes: 327680 }), '运行内存峰值为 327,680 字节，超出上限 325,325 字节')
+  assert.equal(
+    message({ memoryBytes: 303104, memoryExceeded: true }),
+    '沙箱返回内存超限，记录峰值为 303,104 字节',
+  )
+})
+
+test('内存档位使用十进制字节数，订书钉为一级一分', () => {
   assert.deepEqual(
     ['memory-1', 'memory-2', 'memory-3'].map((id) => checksFor(id)[0].limit),
     [16_000_000, 4_000_000, 325_325],
   )
-  assert.equal(contractById['brackets-2'].points, 1)
-  assert.equal(contractById['brackets-2'].level, 1)
+  assert.equal(contractById['brackets-1'].points, 1)
+  assert.equal(contractById['brackets-1'].level, 1)
 })
 
 test('同一运行峰值按预算单调判定，指标不改变沙箱硬上限', async (t) => {
@@ -43,8 +55,9 @@ test('同一运行峰值按预算单调判定，指标不改变沙箱硬上限',
     index = 0
     const result = await evaluate({
       language: 'cpp',
-      source: question.templates.cpp,
+      source: question.solutions.cpp,
       indicators: ['ancient-3', id],
+      question,
     })
     assert.equal(result.verdict, verdict)
     assert.equal(

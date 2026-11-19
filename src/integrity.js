@@ -24,16 +24,16 @@ export function useIntegrity(operationId, { active, snapshot }) {
   let timer = 0
 
   function record(type, detail) {
-    if (active()) queue.push(detail === undefined ? { type, at: Date.now() } : { type, at: Date.now(), detail })
+    if (active()) queue.push({ type, at: Date.now(), detail })
   }
 
   function flush(keepalive = false) {
+    if (!active() && !queue.length) return
     const current = snapshot()
     const key = JSON.stringify(current)
     const changed = key !== reported
     if (!queue.length && !changed && Date.now() - lastSent < heartbeatMs) return
-    const events = queue
-    queue = []
+    const events = queue.splice(0, 200)
     reported = key
     lastSent = Date.now()
     api.activity(operationId, { events, ...(changed && { snapshot: current }) }, keepalive).catch(() => {
@@ -50,7 +50,7 @@ export function useIntegrity(operationId, { active, snapshot }) {
 
   function returnFrom(kind) {
     if (!away[kind]) return
-    record(kind === 'page' ? 'visible' : 'focus', Date.now() - away[kind])
+    record(kind === 'page' ? 'visible' : 'focus', Math.max(0, Date.now() - away[kind]))
     delete away[kind]
   }
 

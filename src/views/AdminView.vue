@@ -3,41 +3,41 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NCheckbox, NSpin } from 'naive-ui'
 import {
   AppWindow,
+  Bug,
+  CalendarClock,
   ClipboardPaste,
+  Clock3,
   Code2,
   EyeOff,
   History,
+  Hourglass,
+  LayoutDashboard,
   LogIn,
   Minimize,
   Radar,
-  Bug,
   RotateCw,
+  Send,
   ShieldAlert,
+  ShieldCheck,
+  Trophy,
 } from 'lucide-vue-next'
 import { api } from '../api.js'
-import { submitGraceMs } from '../../shared/contracts.js'
+import { contractById, levelNames, pointsOf, submitGraceMs } from '../../shared/contracts.js'
+import { activityLabels, flaggedActivity, phaseLabels } from '../../shared/labels.js'
 import { languageById } from '../../shared/languages.js'
 import UiButton from '../components/UiButton.vue'
+import InfoPopover from '../components/InfoPopover.vue'
+import RoundPopover from '../components/RoundPopover.vue'
+import IndicatorPopover from '../components/IndicatorPopover.vue'
 
-const flagKinds = [
-  { type: 'fullscreen-exit', label: '退出全屏', icon: Minimize },
-  { type: 'hidden', label: '切到后台', icon: EyeOff },
-  { type: 'blur', label: '窗口失焦', icon: AppWindow },
-  { type: 'paste', label: '粘贴', icon: ClipboardPaste },
-  { type: 'devtools', label: '开发者工具', icon: Bug },
-]
-const flagTypes = new Set(flagKinds.map((kind) => kind.type))
-const eventLabels = {
-  open: '打开页面',
-  leave: '离开页面',
-  'fullscreen-enter': '进入全屏',
-  'fullscreen-exit': '退出全屏',
-  hidden: '切到后台',
-  visible: '回到前台',
-  blur: '窗口失焦',
-  focus: '窗口聚焦',
-  devtools: '尝试打开开发者工具',
+const flagIcons = {
+  'fullscreen-exit': Minimize,
+  hidden: EyeOff,
+  blur: AppWindow,
+  paste: ClipboardPaste,
+  devtools: Bug,
 }
+const flagKinds = flaggedActivity.map((type) => ({ type, label: activityLabels[type], icon: flagIcons[type] }))
 
 const operations = ref([])
 const selectedId = ref('')
@@ -46,6 +46,12 @@ const all = ref(false)
 const loaded = ref(false)
 const error = ref(null)
 const codeView = ref('live')
+const tab = ref('overview')
+const tabs = [
+  { key: 'overview', label: '总览', icon: LayoutDashboard },
+  { key: 'log', label: '日志', icon: History },
+  { key: 'code', label: '代码', icon: Code2 },
+]
 const offset = ref(0)
 const now = ref(Date.now())
 let sequence = 0
@@ -55,8 +61,13 @@ let tick = 0
 const current = computed(() => now.value + offset.value)
 const denied = computed(() => [401, 403].includes(error.value?.status))
 const pad = (value) => String(value).padStart(2, '0')
-const clock = (time) => new Date(time).toLocaleTimeString('zh-CN', { hour12: false })
-const languageName = (id) => languageById[id]?.name || id
+const clock = new Intl.DateTimeFormat('zh-CN', {
+  hour12: false,
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+}).format
+const languageName = (id) => languageById[id].name
 
 function seconds(ms) {
   const total = Math.round(ms / 1000)
@@ -68,22 +79,50 @@ function ago(iso) {
   if (total < 60) return `${total} 秒前`
   return total < 3600 ? `${Math.floor(total / 60)} 分钟前` : `${Math.floor(total / 3600)} 小时前`
 }
-function remaining({ deadline }) {
-  if (!deadline) return { text: '—' }
+function remaining({ deadline, running }) {
+  if (!running) return { text: '已结束', state: 'ended' }
   const left = Date.parse(deadline) - current.value
   if (left <= 0) return { text: left > -submitGraceMs ? '宽限中' : '已结束', state: 'ended' }
   const total = Math.ceil(left / 1000)
   return { text: `${pad(Math.floor(total / 60))}:${pad(total % 60)}`, state: left < 300_000 && 'urgent' }
 }
 function describe({ type, detail }) {
-  if (type === 'paste') return `粘贴 ${detail ?? 0} 字`
-  const label = eventLabels[type] || type
+  if (type === 'paste') return `粘贴 ${detail} 字`
+  const label = activityLabels[type]
   return detail && (type === 'visible' || type === 'focus') ? `${label}（离开 ${seconds(detail)}）` : label
 }
+function decorate(item) {
+  const rounds = item.rounds.map((round, index) => ({
+    ...round,
+    index,
+    mark: levelNames[index],
+    items: round.contracts.map((id) => contractById[id]),
+    points: pointsOf(round.contracts),
+    current: index === item.current && item.running,
+  }))
+  return {
+    ...item,
+    rounds,
+    stage: rounds[item.current],
+    left: remaining(item),
+    alerts: flagKinds.filter((kind) => item.flags[kind.type] > 0),
+    away: item.awayMs >= 1000,
+  }
+}
 
-const rows = computed(() => operations.value.map((item) => ({ ...item, left: remaining(item) })))
+const rows = computed(() => operations.value.map(decorate))
+const view = computed(() => detail.value && decorate(detail.value))
 const onlineCount = computed(() => operations.value.filter((item) => item.online).length)
-const events = computed(() => [...(detail.value?.events || [])].reverse())
+const events = computed(() =>
+  (detail.value?.events || [])
+    .map((event) => ({
+      at: clock(event.at),
+      receivedAt: clock(event.receivedAt),
+      text: describe(event),
+      icon: flagIcons[event.type],
+    }))
+    .reverse(),
+)
 const code = computed(() => {
   const submission = detail.value?.submission
   if (codeView.value === 'submitted' && submission?.source != null)
@@ -91,7 +130,11 @@ const code = computed(() => {
   return detail.value?.live
 })
 
+function schedulePoll() {
+  poll = setTimeout(() => (document.hidden ? schedulePoll() : load()), 5000)
+}
 async function load() {
+  clearTimeout(poll)
   const request = ++sequence
   const id = selectedId.value
   try {
@@ -104,23 +147,25 @@ async function load() {
     loaded.value = true
   } catch (e) {
     if (request === sequence) error.value = e
+  } finally {
+    if (request === sequence) schedulePoll()
   }
 }
 function select(item) {
   if (item.id === selectedId.value) return
   selectedId.value = item.id
-  detail.value = item
+  detail.value = operations.value.find((operation) => operation.id === item.id)
   codeView.value = 'live'
   load()
 }
 watch(all, load)
 onMounted(() => {
   load()
-  poll = setInterval(load, 5000)
   tick = setInterval(() => (now.value = Date.now()), 1000)
 })
 onBeforeUnmount(() => {
-  clearInterval(poll)
+  sequence++
+  clearTimeout(poll)
   clearInterval(tick)
 })
 </script>
@@ -156,167 +201,181 @@ onBeforeUnmount(() => {
           <h1><Radar :size="18" />作战监控</h1>
           <div class="heading-meta">
             <span v-if="error" class="stale">{{ error.message }}</span>
-            <span>共 <b class="num">{{ operations.length }}</b></span>
-            <span>在线 <b class="num">{{ onlineCount }}</b></span>
+            <span>共 <b>{{ operations.length }}</b></span>
+            <span>在线 <b>{{ onlineCount }}</b></span>
             <NCheckbox v-model:checked="all">含 24 小时内已结束</NCheckbox>
           </div>
         </header>
-        <div v-scroll-fade class="table-scroll">
-          <table class="ops-table">
-            <thead>
-              <tr>
-                <th>选手</th>
-                <th>剩余</th>
-                <th>题目 / 语言</th>
-                <th>指标</th>
-                <th>分值</th>
-                <th>异常</th>
-                <th>离开</th>
-                <th>最后活动</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="item in rows"
-                :key="item.id"
-                :class="{ selected: item.id === selectedId, ended: !item.running }"
-                tabindex="0"
-                @click="select(item)"
-                @keydown.enter="select(item)"
+        <ul v-if="rows.length" v-scroll-fade class="op-list">
+          <li
+            v-for="item in rows"
+            :key="item.id"
+            class="op-card"
+            :class="{ selected: item.id === selectedId, ended: !item.running }"
+            tabindex="0"
+            @click="select(item)"
+            @keydown.enter="select(item)"
+          >
+            <div class="player">
+              <span class="avatar"
+                ><img v-if="item.user.avatar" :src="item.user.avatar" alt="" /><template v-else>{{
+                  item.user.name.slice(0, 1)
+                }}</template
+                ><i :class="{ online: item.online }"
+              /></span>
+              <div class="stack">
+                <b>{{ item.user.name }}</b>
+                <small>{{ languageName(item.language) }} · {{ item.online ? '在线' : ago(item.seenAt) }}</small>
+              </div>
+            </div>
+
+            <div class="stage">
+              <ol class="round-track">
+                <RoundPopover v-for="round in item.rounds" :key="round.index" :round="round">
+                  <li :class="[round.phase, { current: round.current }]">{{ round.mark }}</li>
+                </RoundPopover>
+              </ol>
+              <small>{{ item.stage.title || phaseLabels[item.stage.phase] }}</small>
+            </div>
+
+            <div class="contract-strip">
+              <IndicatorPopover
+                v-for="contract in item.stage.items"
+                :key="contract.id"
+                :item="contract"
+                placement="bottom"
               >
-                <td>
-                  <div class="player">
-                    <span class="avatar"
-                      ><img v-if="item.user.avatar" :src="item.user.avatar" alt="" /><template v-else>{{
-                        item.user.name.slice(0, 1)
-                      }}</template
-                      ><i :class="{ online: item.online }" :title="item.online ? '在线' : '离线'"
-                    /></span>
-                    <b>{{ item.user.name }}</b>
-                  </div>
-                </td>
-                <td class="num countdown" :class="item.left.state">{{ item.left.text }}</td>
-                <td>
-                  <div class="title">{{ item.question }}</div>
-                  <small>{{ languageName(item.language) }}</small>
-                </td>
-                <td>
-                  <div class="chips">
-                    <span v-for="contract in item.contracts" :key="contract.id">{{ contract.name }}</span>
-                    <small v-if="!item.contracts.length">无</small>
-                  </div>
-                </td>
-                <td class="num">
-                  {{ item.score }}
-                  <small
-                    v-if="item.submission"
-                    class="verdict"
-                    :class="{ accepted: item.submission.verdict === 'AC' }"
-                    >{{ item.submission.verdict }} {{ item.submission.score }}</small
+                <span class="contract-icon" :data-level="contract.level"><img :src="contract.icon" alt="" /></span>
+              </IndicatorPopover>
+              <small v-if="!item.stage.items.length">未选指标</small>
+            </div>
+
+            <InfoPopover title="异常行为" placement="bottom-end" :width="240">
+              <template #trigger>
+                <div class="alerts">
+                  <span v-for="kind in item.alerts" :key="kind.type"
+                    ><component :is="kind.icon" :size="15" />{{ item.flags[kind.type] }}</span
                   >
-                </td>
-                <td>
-                  <div class="flags">
-                    <span
-                      v-for="kind in flagKinds"
-                      :key="kind.type"
-                      :class="{ hot: item.flags[kind.type] > 0 }"
-                      :title="kind.label"
-                      ><component :is="kind.icon" :size="13" /><i class="num">{{
-                        item.flags[kind.type]
-                      }}</i></span
-                    >
-                  </div>
-                </td>
-                <td class="num" :class="{ hot: item.awayMs >= 1000 }">
-                  {{ item.awayMs >= 1000 ? seconds(item.awayMs) : '—' }}
-                </td>
-                <td class="num seen">{{ ago(item.seenAt) }}</td>
-              </tr>
-            </tbody>
-          </table>
-          <p v-if="!rows.length" class="empty">{{ all ? '24 小时内没有作战记录' : '暂无进行中的作战' }}</p>
-        </div>
+                  <span v-if="item.away"><Hourglass :size="15" />{{ Math.round(item.awayMs / 1000) }}s</span>
+                  <ShieldCheck v-if="!item.alerts.length && !item.away" class="clear" :size="18" />
+                </div>
+              </template>
+              <ul class="flag-list">
+                <li v-for="kind in flagKinds" :key="kind.type" :class="{ hot: item.flags[kind.type] > 0 }">
+                  <component :is="kind.icon" :size="14" />{{ kind.label }}<b>{{ item.flags[kind.type] }}</b>
+                </li>
+                <li :class="{ hot: item.away }"><Hourglass :size="14" />离开总计<b>{{ seconds(item.awayMs) }}</b></li>
+              </ul>
+            </InfoPopover>
+
+            <div class="clock" :class="item.left.state"><Clock3 :size="15" />{{ item.left.text }}</div>
+
+            <div class="score">
+              <strong><span class="num">{{ item.score }}</span><img src="/assets/risk-level.webp" alt="分" /></strong>
+              <small v-if="item.submission" :class="{ accepted: item.submission.verdict === 'AC' }"
+                >最近 {{ item.submission.verdict }}</small
+              >
+            </div>
+          </li>
+        </ul>
+        <p v-else class="empty">{{ all ? '24 小时内没有作战记录' : '暂无进行中的作战' }}</p>
       </section>
 
       <section class="panel detail-panel" aria-label="作战详情">
-        <template v-if="detail">
-          <header class="panel-heading">
-            <h2>
-              <span class="avatar"
-                ><img v-if="detail.user.avatar" :src="detail.user.avatar" alt="" /><template v-else>{{
-                  detail.user.name.slice(0, 1)
-                }}</template
-                ><i :class="{ online: detail.online }"
-              /></span>
-              {{ detail.user.name }}
-            </h2>
-            <small class="num user-id">{{ detail.user.id }}</small>
+        <template v-if="view">
+          <header class="detail-head">
+            <span class="avatar"
+              ><img v-if="view.user.avatar" :src="view.user.avatar" alt="" /><template v-else>{{
+                view.user.name.slice(0, 1)
+              }}</template
+              ><i :class="{ online: view.online }"
+            /></span>
+            <div class="stack">
+              <h2>{{ view.user.name }}</h2>
+              <small>{{ view.user.id }}</small>
+            </div>
+            <div class="detail-clock" :class="view.left.state">
+              <b>{{ view.left.text }}</b><small>{{ view.online ? '在线' : `离线 · ${ago(view.seenAt)}` }}</small>
+            </div>
           </header>
-          <dl class="facts">
-            <div>
-              <dt>开始</dt>
-              <dd class="num">{{ clock(Date.parse(detail.createdAt)) }}</dd>
-            </div>
-            <div>
-              <dt>剩余</dt>
-              <dd class="num countdown" :class="remaining(detail).state">{{ remaining(detail).text }}</dd>
-            </div>
-            <div>
-              <dt>指标分值</dt>
-              <dd class="num">{{ detail.score }}</dd>
-            </div>
-            <div>
-              <dt>提交</dt>
-              <dd
-                v-if="detail.submission"
-                class="num verdict"
-                :class="{ accepted: detail.submission.verdict === 'AC' }"
-              >
-                {{ detail.submission.verdict }} {{ detail.submission.score }}/{{ detail.submission.maxScore }}
-              </dd>
-              <dd v-else>未提交</dd>
-            </div>
-            <div>
-              <dt>离开总计</dt>
-              <dd class="num" :class="{ hot: detail.awayMs >= 1000 }">{{ seconds(detail.awayMs) }}</dd>
-            </div>
-          </dl>
-          <div class="detail-body">
-            <section class="timeline">
-              <h3><History :size="15" />行为记录<small class="num">{{ events.length }}</small></h3>
-              <NSpin v-if="!detail.events" size="small" />
-              <ol v-else-if="events.length" v-scroll-fade>
-                <li v-for="(event, index) in events" :key="index" :class="{ hot: flagTypes.has(event.type) }">
-                  <time class="num" :title="`服务器接收：${clock(event.receivedAt)}`">{{
-                    clock(event.at)
-                  }}</time>
-                  <span>{{ describe(event) }}</span>
-                </li>
-              </ol>
-              <p v-else class="empty">暂无记录</p>
-            </section>
-            <section class="code">
-              <h3>
-                <Code2 :size="15" />
-                <button :class="{ active: codeView === 'live' }" @click="codeView = 'live'">实时代码</button>
-                <button
-                  v-if="detail.submission?.source != null"
-                  :class="{ active: codeView === 'submitted' }"
-                  @click="codeView = 'submitted'"
+          <nav class="detail-tabs">
+            <button v-for="item in tabs" :key="item.key" :class="{ active: tab === item.key }" @click="tab = item.key">
+              <component :is="item.icon" :size="15" />{{ item.label
+              }}<small v-if="item.key === 'log' && detail.events">{{ events.length }}</small>
+            </button>
+          </nav>
+
+          <div v-if="tab === 'overview'" v-scroll-fade class="overview">
+            <ul class="facts">
+              <li><CalendarClock :size="15" />开始时间<b>{{ clock(Date.parse(view.createdAt)) }}</b></li>
+              <li><Code2 :size="15" />语言<b>{{ languageName(view.language) }}</b></li>
+              <li><Trophy :size="15" />累计得分<b class="num">{{ view.score }}</b></li>
+              <li :class="view.submission && (view.submission.verdict === 'AC' ? 'accepted' : 'hot')">
+                <Send :size="15" />最近提交<b>{{
+                  view.submission
+                    ? `${view.submission.verdict} · ${view.submission.score}/${view.submission.maxScore}`
+                    : '未提交'
+                }}</b>
+              </li>
+            </ul>
+            <h3>回合</h3>
+            <ol class="round-cards">
+              <li v-for="round in view.rounds" :key="round.index" :class="[round.phase, { current: round.current }]">
+                <span class="round-mark">{{ round.mark }}</span>
+                <b>{{ round.title || (round.phase === 'pending' ? '尚未开放' : '未选题') }}</b>
+                <small
+                  >{{ phaseLabels[round.phase] }}<template v-if="round.phase === 'passed'"> · +{{ round.score }}</template></small
                 >
-                  提交代码
-                </button>
-                <small v-if="code"
-                  >{{ languageName(code.language) }} · <span class="num">{{ ago(code.at) }}</span></small
-                >
-              </h3>
-              <pre v-if="code">{{ code.source }}</pre>
-              <p v-else class="empty">尚未收到代码快照</p>
-            </section>
+                <div class="contract-strip">
+                  <IndicatorPopover v-for="contract in round.items" :key="contract.id" :item="contract" placement="left">
+                    <span class="contract-icon" :data-level="contract.level"><img :src="contract.icon" alt="" /></span>
+                  </IndicatorPopover>
+                </div>
+                <span class="round-points"
+                  ><template v-if="round.items.length"
+                    ><span class="num">{{ round.points }}</span><img src="/assets/risk-level.webp" alt="指标总计" /></template
+                ></span>
+              </li>
+            </ol>
+            <h3>异常行为</h3>
+            <ul class="facts">
+              <li v-for="kind in flagKinds" :key="kind.type" :class="{ hot: view.flags[kind.type] > 0 }">
+                <component :is="kind.icon" :size="15" />{{ kind.label }}<b>{{ view.flags[kind.type] }}</b>
+              </li>
+              <li :class="{ hot: view.away }"><Hourglass :size="15" />离开总计<b>{{ seconds(view.awayMs) }}</b></li>
+            </ul>
           </div>
+
+          <section v-else-if="tab === 'log'" class="timeline">
+            <NSpin v-if="!detail.events" size="small" />
+            <ol v-else-if="events.length" v-scroll-fade>
+              <li v-for="(event, index) in events" :key="index" :class="{ hot: event.icon }">
+                <component :is="event.icon" v-if="event.icon" :size="13" /><i v-else />
+                <time :title="`服务器接收：${event.receivedAt}`">{{ event.at }}</time>
+                <span>{{ event.text }}</span>
+              </li>
+            </ol>
+            <p v-else class="empty">暂无记录</p>
+          </section>
+
+          <section v-else class="code">
+            <div class="code-bar">
+              <button :class="{ active: codeView === 'live' }" @click="codeView = 'live'">实时代码</button>
+              <button
+                v-if="detail.submission?.source != null"
+                :class="{ active: codeView === 'submitted' }"
+                @click="codeView = 'submitted'"
+              >
+                提交代码
+              </button>
+              <small v-if="code">{{ languageName(code.language) }} · {{ ago(code.at) }}</small>
+            </div>
+            <pre v-if="code">{{ code.source }}</pre>
+            <NSpin v-else-if="!detail.events" size="small" />
+            <p v-else class="empty">尚未收到代码快照</p>
+          </section>
         </template>
-        <p v-else class="empty">选择一场作战，查看行为记录与实时代码</p>
+        <p v-else class="empty">选择一场作战，查看总览、日志与实时代码</p>
       </section>
     </div>
   </main>
@@ -325,6 +384,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .admin-view {
   padding-top: var(--space-4);
+  user-select: text;
 }
 .admin-state {
   min-height: 70vh;
@@ -338,7 +398,7 @@ onBeforeUnmount(() => {
   text-align: center;
 }
 .admin-state > svg {
-  color: var(--orange);
+  color: var(--red);
 }
 .admin-state h2 {
   font-size: 24px;
@@ -376,16 +436,14 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  min-height: 56px;
-  padding: 10px 18px;
+  min-height: 52px;
+  padding: 8px 18px;
   border-bottom: 1px solid var(--line);
 }
-.panel-heading h1,
-.panel-heading h2 {
+.panel-heading h1 {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-width: 0;
   font-size: 18px;
   font-weight: 500;
   letter-spacing: 0.02em;
@@ -403,17 +461,11 @@ onBeforeUnmount(() => {
 }
 .heading-meta b {
   font-size: 16px;
-  font-weight: 400;
+  font-weight: 500;
   color: var(--text);
 }
 .stale {
   color: #ff718a;
-}
-.user-id {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--muted);
 }
 .empty {
   padding: 32px 18px;
@@ -421,89 +473,31 @@ onBeforeUnmount(() => {
   font-size: 13px;
   color: var(--muted);
 }
-
-.table-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-}
-.ops-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-  color: var(--soft);
-  text-align: left;
-}
-.ops-table th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  padding: 10px 10px 8px;
-  background: var(--surface);
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--muted);
-  white-space: nowrap;
-}
-.ops-table td {
-  padding: 9px 10px;
-  border-top: 1px solid #ffffff0a;
-  vertical-align: middle;
-}
-.ops-table th:first-child,
-.ops-table td:first-child {
-  padding-left: 18px;
-}
-.ops-table tbody tr {
-  cursor: pointer;
-  transition: background 0.12s;
-}
-.ops-table tbody tr:hover {
-  background: #ffffff08;
-}
-.ops-table tbody tr.selected {
-  background: linear-gradient(90deg, #ff640c1f, transparent 80%);
-  box-shadow: inset 2px 0 var(--orange);
-}
-.ops-table tbody tr.ended {
-  opacity: 0.55;
-}
-.ops-table small {
-  font-size: 12px;
-  color: var(--muted);
-}
-.ops-table td.num {
-  font-size: 15px;
-  white-space: nowrap;
-}
-.ops-table .seen {
-  font-size: 13px;
-  color: var(--muted);
-}
-.player {
+.stack {
+  min-width: 0;
   display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 120px;
+  flex-direction: column;
 }
-.player b {
-  font-weight: 500;
-  color: var(--text);
+.stack > * {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 160px;
 }
+.stack small {
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .avatar {
   flex: none;
   position: relative;
   display: inline-grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
-  background: var(--raised);
-  font-size: 13px;
+  background: linear-gradient(140deg, #4a4b50, #2a2b2f);
+  font-size: 15px;
   color: var(--text);
 }
 .avatar img {
@@ -516,8 +510,8 @@ onBeforeUnmount(() => {
   position: absolute;
   right: -1px;
   bottom: -1px;
-  width: 9px;
-  height: 9px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   border: 2px solid var(--surface);
   background: #5f6067;
@@ -526,140 +520,476 @@ onBeforeUnmount(() => {
   background: var(--green);
   box-shadow: 0 0 6px var(--green);
 }
-.title {
-  max-width: 180px;
+
+.op-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin: 0;
+  padding: 10px 12px;
+  list-style: none;
+  display: grid;
+  grid-template-columns: minmax(170px, 1fr) auto minmax(96px, 1fr) auto auto auto;
+  align-content: start;
+  gap: 6px 22px;
+}
+.op-card {
+  position: relative;
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
+  min-height: 62px;
+  padding: 8px 16px 8px 14px;
+  border-left: 3px solid transparent;
+  background: linear-gradient(135deg, #2a2b2e, #232427);
+  cursor: pointer;
+  outline: none;
+  transition:
+    background 0.12s,
+    border-color 0.12s;
+}
+.op-card::after {
+  content: '';
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 44px;
+  pointer-events: none;
+  opacity: 0.035;
+  background: repeating-linear-gradient(135deg, transparent 0 15px, white 15px 26px);
+}
+.op-card:hover,
+.op-card:focus-visible {
+  background: linear-gradient(135deg, #313236, #29292d);
+}
+.op-card.selected {
+  border-left-color: var(--red);
+  background: linear-gradient(90deg, #e5003224, #26272a 70%);
+}
+.op-card.ended {
+  opacity: 0.55;
+}
+.player {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.player b {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.stage {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.stage small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 12px;
+  color: var(--soft);
 }
-.chips {
+.round-track {
+  display: flex;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.round-track li,
+.round-mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 22px;
+  clip-path: polygon(22% 0, 78% 0, 100% 50%, 78% 100%, 22% 100%, 0 50%);
+  background: #ffffff14;
+  font: 400 13px/1 var(--font-num);
+  color: var(--muted);
+}
+.round-track .passed,
+.round-cards .passed .round-mark {
+  background: #b9cf8a33;
+  color: var(--green);
+}
+.round-track .abandoned,
+.round-cards .abandoned .round-mark {
+  color: #5d5e60;
+}
+.round-track .current,
+.round-cards .current .round-mark {
+  background: var(--red);
+  color: #fff;
+}
+.contract-strip {
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  max-width: 220px;
 }
-.chips span {
-  padding: 1px 6px;
-  border-radius: 2px;
-  background: #ffffff0f;
+.contract-strip small {
   font-size: 12px;
-  white-space: nowrap;
-}
-.countdown.urgent {
-  color: #ff4d6a;
-}
-.countdown.ended {
   color: var(--muted);
 }
-.verdict {
-  margin-left: 6px;
-  color: #ff6f86;
+.contract-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-bottom: 2px solid #ffab34;
+  background: #121314;
+  cursor: help;
+  transition: filter 0.12s;
 }
-.verdict.accepted {
-  color: var(--green);
+.contract-icon[data-level='2'] {
+  border-color: #b664f5;
 }
-.flags {
-  display: flex;
-  gap: 10px;
+.contract-icon[data-level='3'] {
+  border-color: #f4486d;
 }
-.flags span {
+.contract-icon:hover {
+  filter: brightness(1.3);
+}
+.contract-icon img {
+  width: 20px;
+  height: 20px;
+}
+
+.op-card .contract-strip {
+  display: grid;
+  grid-template-rows: repeat(2, 24px);
+  grid-auto-flow: column;
+  grid-auto-columns: 24px;
+  align-content: center;
+}
+.op-card .contract-strip small {
+  grid-row: 1 / -1;
+  align-self: center;
+  white-space: nowrap;
+}
+.op-card .contract-icon {
+  width: 24px;
+  height: 24px;
+}
+.op-card .contract-icon img {
+  width: 17px;
+  height: 17px;
+}
+.alerts {
+  display: grid;
+  grid-template-rows: repeat(2, auto);
+  grid-auto-flow: column;
+  align-content: center;
+  gap: 4px 10px;
+  min-width: 24px;
+  cursor: help;
+  font-size: 13px;
+  font-weight: 500;
+  color: #ff4d6a;
+}
+.alerts span {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  color: #6c6e73;
 }
-.flags i {
-  font-style: normal;
-  font-size: 14px;
+.alerts .clear {
+  grid-row: 1 / -1;
+  color: #5f6166;
 }
-.flags .hot,
-td.hot,
-dd.hot,
-.timeline li.hot {
+.flag-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.flag-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+.flag-list b {
+  margin-left: auto;
+  font-weight: 500;
+}
+.flag-list .hot {
   color: #ff4d6a;
 }
 
-.facts {
-  flex: none;
-  display: grid;
-  grid-template-columns: repeat(5, auto);
-  gap: 12px;
-  margin: 0;
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--line);
-}
-.facts dt {
-  font-size: 12px;
-  color: var(--muted);
-}
-.facts dd {
-  margin: 2px 0 0;
-  font-size: 16px;
+.clock {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  font-weight: 500;
   color: var(--text);
   white-space: nowrap;
 }
-.detail-body {
+.clock svg {
+  color: var(--muted);
+}
+.clock.urgent,
+.detail-clock.urgent b {
+  color: #ff4d6a;
+}
+.clock.ended {
+  font-weight: 400;
+  color: var(--muted);
+}
+.score {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.score strong {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 26px;
+  font-weight: 400;
+  line-height: 1;
+  color: var(--text);
+}
+.score strong img,
+.round-points img {
+  width: 15px;
+  height: 16px;
+  opacity: 0.8;
+}
+.score small {
+  margin-top: 3px;
+  font-size: 11px;
+  color: #ff6f86;
+  white-space: nowrap;
+}
+.score small.accepted {
+  color: var(--green);
+}
+
+.detail-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 18px;
+}
+.detail-head h2 {
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.3;
+}
+.detail-clock {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  white-space: nowrap;
+}
+.detail-clock b {
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 1.15;
+}
+.detail-clock.ended b {
+  color: var(--muted);
+}
+.detail-clock small {
+  font-size: 12px;
+  color: var(--muted);
+}
+.detail-tabs {
+  flex: none;
+  display: flex;
+  gap: 4px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--line);
+}
+.detail-tabs button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+  transition:
+    color 0.12s,
+    border-color 0.12s;
+}
+.detail-tabs button:hover {
+  color: var(--soft);
+}
+.detail-tabs button.active {
+  border-bottom-color: var(--red);
+  color: var(--text);
+}
+.detail-tabs small {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.overview {
   flex: 1;
   min-height: 0;
-  display: grid;
-  grid-template-rows: minmax(120px, 0.8fr) minmax(0, 1.2fr);
-  grid-template-columns: minmax(0, 1fr);
+  overflow: auto;
+  padding: 12px 18px 16px;
 }
+.overview h3 {
+  margin: 16px 0 6px;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.facts li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 34px;
+  padding: 0 12px;
+  background: #ffffff08;
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.facts b {
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+}
+.facts b.num {
+  font-size: 18px;
+  font-weight: 400;
+}
+.facts .accepted b {
+  color: var(--green);
+}
+.facts .hot,
+.facts .hot b {
+  color: #ff6f86;
+}
+.round-cards {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.round-cards li {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto 44px;
+  align-items: center;
+  gap: 10px;
+  height: 42px;
+  padding: 0 12px 0 8px;
+  background: linear-gradient(90deg, #ffffff0a, #ffffff03);
+}
+.round-cards li.pending {
+  opacity: 0.5;
+}
+.round-cards b {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+}
+.round-cards small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+.round-cards .contract-strip {
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+}
+.round-cards .contract-icon {
+  width: 26px;
+  height: 26px;
+}
+.round-points {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  font-size: 20px;
+  color: var(--soft);
+}
+
 .timeline,
 .code {
+  flex: 1;
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
-}
-.timeline {
-  border-bottom: 1px solid var(--line);
-}
-.detail-body h3 {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 18px 6px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--soft);
-}
-.detail-body h3 svg {
-  color: var(--muted);
-}
-.detail-body h3 small {
-  margin-left: auto;
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--muted);
 }
 .timeline ol {
   flex: 1;
   min-height: 0;
   overflow: auto;
   margin: 0;
-  padding: 0 18px 10px;
+  padding: 10px 18px;
   list-style: none;
 }
 .timeline li {
   display: flex;
-  gap: 14px;
-  padding: 3px 0;
+  align-items: center;
+  gap: 10px;
+  height: 26px;
   font-size: 13px;
   color: var(--soft);
 }
+.timeline li > i {
+  flex: none;
+  width: 13px;
+  height: 5px;
+  background: radial-gradient(circle, #5f6166 2px, transparent 2.5px);
+}
 .timeline time {
   flex: none;
+  font-size: 12px;
   color: var(--muted);
 }
+.timeline li.hot,
 .timeline li.hot time {
-  color: inherit;
+  color: #ff4d6a;
 }
-.timeline .n-spin-body {
-  margin: 16px auto;
+.timeline .n-spin-body,
+.code .n-spin-body {
+  margin: 24px auto;
 }
-.code h3 button {
+.code-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 18px 8px;
+}
+.code-bar button {
   padding: 2px 10px;
   border: 0;
   border-radius: 11px;
@@ -668,9 +998,14 @@ dd.hot,
   font-size: 13px;
   cursor: pointer;
 }
-.code h3 button.active {
+.code-bar button.active {
   background: var(--light);
   color: #2a2b2e;
+}
+.code-bar small {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
 }
 .code pre {
   flex: 1;
@@ -683,5 +1018,12 @@ dd.hot,
   font: 12.5px/1.6 var(--mono);
   color: var(--soft);
   tab-size: 4;
+  user-select: text;
+}
+
+@media (max-width: 1280px) {
+  .op-list {
+    column-gap: 14px;
+  }
 }
 </style>

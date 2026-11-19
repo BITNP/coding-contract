@@ -1,15 +1,17 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { evaluate } from '../server/judge.js'
-import { question, cases } from '../server/question.js'
+import { questions } from '../server/questions/index.js'
 import { languages } from '../shared/languages.js'
 
 const integration = { skip: !process.env.JUDGE_INTEGRATION, timeout: 180_000 }
-const submit = (language, source, indicators = []) => evaluate({ language, source, indicators })
+const question = questions['max-subarray']
+const { cases, solutions } = question
+const submit = (language, source, indicators = []) => evaluate({ language, source, indicators, question })
 
 for (const language of languages) {
-  test(`${language.name} 模板通过全部边界数据并计分`, integration, async () => {
-    const result = await submit(language.id, question.templates[language.id], ['source-1'])
+  test(`${language.name} 参考解通过全部边界数据并计分`, integration, async () => {
+    const result = await submit(language.id, solutions[language.id], ['source-1'])
     assert.equal(result.verdict, 'AC', JSON.stringify(result))
     assert.equal(result.cases.length, cases.length)
     assert.equal(result.passed, true)
@@ -18,6 +20,92 @@ for (const language of languages) {
     assert.ok(result.codeLines > 0)
   })
 }
+
+const roundSolutions = {
+  'max-rise': `import sys
+values = map(int, sys.stdin.buffer.read().split())
+next(values)
+previous = next(values)
+best = length = 1
+for value in values:
+  length = length + 1 if value > previous else 1
+  best = max(best, length)
+  previous = value
+print(best)`,
+  maze: `from collections import deque
+height, width = map(int, input().split())
+grid = [input() for _ in range(height)]
+start = next((y, row.index('S')) for y, row in enumerate(grid) if 'S' in row)
+queue = deque([(*start, 0)])
+seen = {start}
+while queue:
+  y, x, steps = queue.popleft()
+  if grid[y][x] == 'E':
+    print(steps)
+    break
+  for ny, nx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+    if 0 <= ny < height and 0 <= nx < width and grid[ny][nx] != '#' and (ny, nx) not in seen:
+      seen.add((ny, nx))
+      queue.append((ny, nx, steps + 1))
+else:
+  print(-1)`,
+  'channel-schedule': `import sys
+read = sys.stdin.buffer.readline
+requests = [tuple(map(int, read().split())) for _ in range(int(read()))]
+available = count = 0
+for start, end in sorted(requests, key=lambda request: request[1]):
+  if start >= available:
+    count += 1
+    available = end
+print(count)`,
+  'fee-trading': `import sys
+values = map(int, sys.stdin.buffer.read().split())
+_, fee = next(values), next(values)
+cash, hold = 0, -next(values)
+for price in values:
+  cash, hold = max(cash, hold + price - fee), max(hold, cash - price)
+print(cash)`,
+}
+
+for (const [id, source] of Object.entries(roundSolutions)) {
+  test(`${questions[id].title}参考解通过所有正式数据`, integration, async () => {
+    const question = questions[id]
+    const result = await evaluate({ question, source, language: 'python', indicators: [] })
+    assert.equal(result.verdict, 'AC', result.message)
+    assert.equal(result.cases.length, question.cases.length)
+  })
+}
+
+test('样例保留运行诊断，正式提交只返回组号和判定', async (t) => {
+  const analysis = { status: 'Accepted', files: { stdout: '{"bytes":8,"codeLines":1}' } }
+  const failure = {
+    status: 'Nonzero Exit Status',
+    files: { stderr: 'sample diagnostic' },
+    error: 'sandbox diagnostic',
+    time: 0,
+    memory: 0,
+  }
+  t.mock.method(globalThis, 'fetch', async (_url, { body }) => {
+    const [cmd] = JSON.parse(body).cmd
+    return Response.json([cmd.args.includes('analyze.py') ? analysis : failure])
+  })
+  const submission = { language: 'python', source: 'print(0)', indicators: [], question }
+  assert.equal((await evaluate({ ...submission, mode: 'sample' })).message, 'sample diagnostic')
+  assert.equal((await evaluate(submission)).message, '第 1 组数据：RE')
+})
+
+test('低等数学 I 检查 Python 整除及其复合赋值', integration, async () => {
+  const result = await evaluate({
+    language: 'python',
+    source: 'x = 8 // 3\nx //= 2',
+    indicators: ['ancient-3', 'arithmetic-1'],
+    question,
+    mode: 'validate',
+  })
+  const check = result.checks.find(({ id }) => id === 'arithmetic-1')
+  assert.equal(check.status, 'failed')
+  assert.deepEqual(check.messages.toSorted(), ['第 1 行：不允许使用运算符 //', '第 2 行：不允许使用运算符 //='])
+})
 
 test('Java 内部类和辅助类一同打包运行', integration, async () => {
   const source = `import java.util.Scanner;
@@ -37,7 +125,7 @@ public class Main {
 
 test('原生语言遵守 4 MB 内存档，运行时超限返回 MLE', integration, async () => {
   for (const language of ['c', 'cpp', 'rust']) {
-    const result = await submit(language, question.templates[language], ['ancient-3', 'memory-2'])
+    const result = await submit(language, solutions[language], ['ancient-3', 'memory-2'])
     assert.equal(result.verdict, 'AC', JSON.stringify(result))
     assert.equal(result.passed, true)
   }
@@ -51,8 +139,8 @@ test('原生语言遵守 4 MB 内存档，运行时超限返回 MLE', integratio
 
 test('C++ 相同源码在 325.325 kB 与 4 MB 档使用一致的运行条件', integration, async () => {
   for (let round = 0; round < 3; round++) {
-    const strict = await submit('cpp', question.templates.cpp, ['ancient-3', 'memory-3'])
-    const relaxed = await submit('cpp', question.templates.cpp, ['ancient-3', 'memory-2'])
+    const strict = await submit('cpp', solutions.cpp, ['ancient-3', 'memory-3'])
+    const relaxed = await submit('cpp', solutions.cpp, ['ancient-3', 'memory-2'])
     assert.equal(strict.verdict, 'MLE', JSON.stringify(strict))
     assert.equal(relaxed.verdict, 'AC', JSON.stringify(relaxed))
     assert.equal(relaxed.cases.length, cases.length)
@@ -78,7 +166,7 @@ test('编译错误、类型错误、答案错误、运行错误、超时和输�
 })
 
 test('C 保留命名、控制流、运算指标检查，宏展开中的运算也参与', integration, async () => {
-  const source = question.templates.c
+  const source = solutions.c
     .replace('#include <stdio.h>', '#include <stdio.h>\n#define ADD(a, b) ((a) + (b))')
     .replace('x + (s > 0 ? s : 0)', 'ADD(x, (s > 0 ? s : 0))')
   const result = await submit('c', source, ['ancient-3', 'shrink-3', 'linear-3', 'arithmetic-1'])
@@ -100,7 +188,7 @@ test('各词法器保留字符串中的注释标记，排除纯注释行', integ
     ['php', '<?php\n// comment\necho "// text";\n', 2],
   ]
   for (const [language, source, codeLines] of samples) {
-    const result = await evaluate({ language, source, indicators: [], mode: 'validate' })
+    const result = await evaluate({ language, source, indicators: [], question, mode: 'validate' })
     assert.equal(result.codeLines, codeLines, language)
     assert.equal(result.cases.length, 0)
   }
@@ -109,8 +197,9 @@ test('各词法器保留字符串中的注释标记，排除纯注释行', integ
 test('样例只运行一组，自动校验不编译运行，运行内存保持待验证', integration, async () => {
   const sample = await evaluate({
     language: 'python',
-    source: question.templates.python,
+    source: solutions.python,
     indicators: [],
+    question,
     mode: 'sample',
   })
   assert.equal(sample.cases.length, 1)
@@ -118,6 +207,7 @@ test('样例只运行一组，自动校验不编译运行，运行内存保持�
     language: 'javascript',
     source: 'while (true) {}',
     indicators: ['ancient-3', 'memory-1'],
+    question,
     mode: 'validate',
   })
   assert.equal(result.verdict, 'CHECKED')

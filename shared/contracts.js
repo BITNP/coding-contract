@@ -10,6 +10,7 @@ export const groups = [
     name: '环境：时限',
     column: 0,
     verification: 'environment',
+    fixed: true,
     variants: [
       { level: 1, description: '作战时限减少 10 分钟', minutes: 10 },
       { level: 2, description: '作战时限减少 20 分钟', minutes: 20 },
@@ -126,13 +127,7 @@ export const groups = [
     name: '控制：订书钉',
     column: 3,
     variants: [
-      // 保留已创建作战和分享码中的 ID。
-      {
-        id: 'brackets-2',
-        level: 1,
-        description: '禁用字符 [ 和 ]',
-        checks: [{ type: 'characters', forbidden: ['[', ']'] }],
-      },
+      { level: 1, description: '禁用字符 [ 和 ]', checks: [{ type: 'characters', forbidden: ['[', ']'] }] },
     ],
   },
   {
@@ -147,7 +142,7 @@ export const groups = [
         checks: [
           {
             type: 'operators',
-            forbidden: ['+', '-', '*', '/', '%', '+=', '-=', '*=', '/=', '%='],
+            forbidden: ['+', '-', '*', '/', '//', '%', '+=', '-=', '*=', '/=', '//=', '%='],
             arity: 'binary',
           },
         ],
@@ -180,6 +175,7 @@ export const groups = [
     name: '环境：感官遮蔽',
     column: 10,
     verification: 'environment',
+    fixed: true,
     variants: [
       { level: 1, description: '禁用代码提示及悬浮提示' },
       { level: 2, description: '禁用代码提示及编辑辅助，仅保留语法着色' },
@@ -188,15 +184,17 @@ export const groups = [
   },
 ]
 
+export const levelNames = ['I', 'II', 'III']
+
 export const indicators = groups.flatMap((group) =>
   group.variants.map((variant) => {
-    const id = variant.id || `${group.id}-${variant.level}`
+    const id = `${group.id}-${variant.level}`
     return {
       ...variant,
       id,
       group: group.id,
       name:
-        group.variants.length > 1 ? `${group.name} ${['I', 'II', 'III'][variant.level - 1]}` : group.name,
+        group.variants.length > 1 ? `${group.name} ${levelNames[variant.level - 1]}` : group.name,
       column: group.column,
       icon: `/assets/indicators/${id}.webp`,
       points: variant.level,
@@ -209,6 +207,7 @@ export const indicators = groups.flatMap((group) =>
           )
           .map((language) => language.id),
       verification: group.verification || 'automatic',
+      fixed: Boolean(group.fixed),
       requires: group.requires || [],
       locked: Boolean(group.requires?.length),
       inherits: variant.inherits || [],
@@ -224,11 +223,18 @@ export const contractById = Object.fromEntries(indicators.map((item) => [item.id
 export const operationMinutes = 60
 export const submitGraceMs = 90_000
 
+export const pointsOf = (ids) => ids.reduce((sum, id) => sum + contractById[id].points, 0)
+
 export const timeLimit = (ids) =>
-  operationMinutes - ids.reduce((sum, id) => sum + (contractById[id]?.minutes || 0), 0)
+  operationMinutes - ids.reduce((sum, id) => sum + (contractById[id].minutes || 0), 0)
 
 export const senseLevel = (ids) =>
-  ids.map((id) => contractById[id]).find((item) => item?.group === 'senses')?.level || 0
+  ids.map((id) => contractById[id]).find((item) => item.group === 'senses')?.level || 0
+
+export const adjustContracts = (current, requested) => [
+  ...current.filter((id) => contractById[id].fixed),
+  ...requested.filter((id) => !contractById[id].fixed),
+]
 
 export function checksFor(id) {
   const item = contractById[id]
@@ -243,8 +249,20 @@ export function unavailableReason(id, ids, language = 'cpp') {
   return ''
 }
 
+export function pruneUnavailable(ids, language) {
+  const kept = ids.filter((id) => !unavailableReason(id, ids, language))
+  return kept.length === ids.length ? kept : pruneUnavailable(kept, language)
+}
+
+export function toggleIndicator(ids, id, language) {
+  const group = contractById[id].group
+  const next = ids.filter((other) => contractById[other].group !== group)
+  if (!ids.includes(id)) next.push(id)
+  return pruneUnavailable(next, language)
+}
+
 // 前端提示和服务端拒绝请求共用这一处判断，服务端始终接收 ID，自行取规则和分值。
-export function selectionErrors(ids, language = 'cpp') {
+export function selectionErrors(ids, language) {
   if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string')) return ['词条必须是 ID 数组']
   if (!languages.some((item) => item.id === language)) return ['不支持的编程语言']
   const errors = []

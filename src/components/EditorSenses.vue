@@ -19,9 +19,9 @@ const service = computed(() => {
   const { state, progress } = lspStatus.value
   const percent = Math.round(progress * 100)
   return {
-    loading: { tone: 'loading', progress, label: `代码提示下载中 ${percent}%` },
+    loading: { tone: 'loading', progress, label: progress === 1 ? '代码提示启动中' : `代码提示下载中 ${percent}%` },
     ready: { icon: Server, label: '代码提示已就绪' },
-    error: { tone: 'error', icon: RotateCw, progress, label: '代码提示下载失败，点击重试', action: true },
+    error: { tone: 'error', icon: RotateCw, progress, label: '代码提示加载失败，点击重试', action: true },
     unsupported: { tone: 'off', icon: Ban, label: '当前浏览器不支持该语言的代码提示' },
     none: { tone: 'off', icon: Server, label: '当前语言暂无代码提示' },
   }[state]
@@ -29,7 +29,7 @@ const service = computed(() => {
 
 const senses = computed(() => [
   { key: 'editor', icon: NotebookPen, label: '编辑器：等宽字体与语法着色', mask: '「感官遮蔽 III」：编辑器已退化为纯文本' },
-  { key: 'aids', icon: CodeXml, label: '编辑辅助：自动补全、括号配对与折叠', mask: '「感官遮蔽 II」：编辑辅助已屏蔽' },
+  { key: 'aids', icon: CodeXml, label: '编辑辅助：自动缩进、括号配对与折叠', mask: '「感官遮蔽 II」：编辑辅助已屏蔽' },
   { key: 'service', ...service.value, mask: '「感官遮蔽 I」：代码提示已屏蔽' },
 ])
 

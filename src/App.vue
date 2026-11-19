@@ -1,13 +1,14 @@
 <script setup>
-import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NConfigProvider, NMessageProvider, NModal, darkTheme } from 'naive-ui'
-import { ArrowLeft, Maximize, Minimize, CircleHelp, UserRound, ArrowUpRight, LogOut } from 'lucide-vue-next'
+import { NConfigProvider, NMessageProvider, darkTheme } from 'naive-ui'
+import { CircleHelp, UserRound, ArrowUpRight, LogOut } from 'lucide-vue-next'
 import { themeOverrides } from './theme'
 import { refreshSession, user, authAvailable, connection } from './state'
 import { api } from './api'
 import UiButton from './components/UiButton.vue'
 import SweepOverlay from './components/SweepOverlay.vue'
+import GameDialog from './components/GameDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -15,7 +16,6 @@ const inOperation = computed(() => route.path.startsWith('/operation/'))
 const loginOpen = ref(false)
 const helpOpen = ref(false)
 const loginError = ref('')
-const fullscreen = ref(false)
 const helpSteps = [
   {
     title: '选择指标',
@@ -27,12 +27,17 @@ const helpSteps = [
   },
   {
     title: '行动开始',
-    text: '确认指标后点击「行动开始」进入作战，阅读题目并提交代码。已选指标会保留，可随时返回调整。',
+    text: '所选指标即作战的初始配置。作战全程需保持全屏，时限从行动开始计时，「环境：时限」和「环境：感官遮蔽」在开局后锁定。',
+  },
+  {
+    title: '三个回合',
+    text: '第一、三回合为固定题目，第二回合三选一。作战中点击左上角的「编辑指标」即可随时调整指标，提交通过才能进入下一回合，也可以放弃本回合。',
+  },
+  {
+    title: '结算',
+    text: '成绩为各已通过回合的指标分之和。三个回合结束或时间耗尽时结算，取历史最高成绩上榜。',
   },
 ]
-function syncFullscreen() {
-  fullscreen.value = Boolean(document.fullscreenElement)
-}
 onMounted(async () => {
   refreshSession()
   await router.isReady()
@@ -42,10 +47,7 @@ onMounted(async () => {
     const { auth_error, ...query } = route.query
     router.replace({ path: route.path, query, hash: route.hash })
   }
-  syncFullscreen()
-  document.addEventListener('fullscreenchange', syncFullscreen)
 })
-onBeforeUnmount(() => document.removeEventListener('fullscreenchange', syncFullscreen))
 
 function signIn() {
   api.login(route.fullPath)
@@ -56,38 +58,20 @@ async function signOut() {
   loginOpen.value = false
   router.push('/')
 }
-async function toggleFullscreen() {
-  if (document.fullscreenElement) await document.exitFullscreen()
-  else await document.documentElement.requestFullscreen()
-}
 </script>
 
 <template>
   <NConfigProvider :theme="darkTheme" :theme-overrides="themeOverrides">
-    <NMessageProvider>
+    <NMessageProvider :duration="2200" :max="3">
       <div class="app-shell">
         <header v-if="!route.meta.bare" class="app-header">
-          <a
-            class="brand"
-            href="/"
-            :aria-label="inOperation ? '返回指标选择' : '网协合约'"
-            @click.prevent="router.push('/')"
-          >
-            <ArrowLeft v-if="inOperation" :size="20" />
-            <span v-else class="brand-slashes">//</span>
-            {{ inOperation ? '作战终端' : '网协合约'
-            }}<span v-if="!inOperation" class="brand-event">开拓测试作战</span>
+          <a v-if="!inOperation" class="brand" href="/" @click.prevent="router.push('/')">
+            <span class="brand-slashes">//</span>网协合约<span class="brand-event">开拓测试作战</span>
           </a>
           <div id="header-status" class="header-status" />
           <div class="header-actions">
             <span v-if="connection === 'offline'" class="connection"><i />连接中断</span>
-            <UiButton
-              kind="ghost"
-              icon-only
-              :aria-label="fullscreen ? '退出全屏' : '进入全屏'"
-              @click="toggleFullscreen"
-              ><component :is="fullscreen ? Minimize : Maximize" :size="21"
-            /></UiButton>
+            <div id="header-tools" class="header-tools" />
             <UiButton kind="ghost" icon-only aria-label="作战指引" @click="helpOpen = true"
               ><CircleHelp :size="23"
             /></UiButton>
@@ -100,50 +84,32 @@ async function toggleFullscreen() {
           <Transition name="page" mode="out-in"><component :is="Component" :key="route.path" /></Transition>
         </RouterView>
       </div>
-      <NModal
-        v-model:show="loginOpen"
-        preset="card"
-        class="game-modal"
-        title="网协统一登录"
-        :bordered="false"
-        style="width: 420px"
-      >
-        <div class="modal-kicker">IDENTITY AUTHORIZATION</div>
-        <template v-if="user"
-          ><p>当前账号：{{ user.name }}</p>
-          <UiButton kind="dark" @click="signOut"><LogOut :size="16" />退出登录</UiButton></template
-        >
-        <template v-else>
-          <div>
-            <p v-if="authAvailable">使用网协统一账号登录并保存个人作战记录。</p>
-            <p v-if="loginError" class="error-text">{{ loginError }}</p>
-            <p v-if="!authAvailable" class="muted">账号服务暂未开放，可先以访客身份参与作战。</p>
-            <UiButton v-if="authAvailable" kind="primary" block @click="signIn"
-              >登录并继续<ArrowUpRight :size="18"
-            /></UiButton>
-            <UiButton v-else kind="primary" block @click="loginOpen = false"
-              >访客体验<ArrowUpRight :size="18"
-            /></UiButton>
-          </div>
+      <GameDialog v-model:show="loginOpen" title="网协统一登录" :width="440">
+        <template v-if="user">
+          <p>当前账号：{{ user.name }}</p>
         </template>
-      </NModal>
-      <NModal
-        v-model:show="helpOpen"
-        preset="card"
-        class="game-modal"
-        title="作战指引"
-        :bordered="false"
-        style="width: 560px"
-      >
-        <div class="modal-kicker">OPERATION MANUAL / 01</div>
+        <template v-else>
+          <p v-if="authAvailable">使用网协统一账号登录并保存个人作战记录。</p>
+          <p v-else>账号服务暂未开放，可先以访客身份参与作战。</p>
+          <p v-if="loginError" class="error-text">{{ loginError }}</p>
+        </template>
+        <template #actions>
+          <UiButton v-if="user" kind="dark" @click="signOut"><LogOut :size="16" />退出登录</UiButton>
+          <UiButton v-else-if="authAvailable" kind="primary" @click="signIn"
+            >登录并继续<ArrowUpRight :size="18"
+          /></UiButton>
+          <UiButton v-else kind="primary" @click="loginOpen = false">访客体验<ArrowUpRight :size="18" /></UiButton>
+        </template>
+      </GameDialog>
+      <GameDialog v-model:show="helpOpen" title="作战指引" :width="560">
         <div v-for="(step, index) in helpSteps" :key="step.title" class="help-step">
-          <b>{{ String(index + 1).padStart(2, '0') }}</b>
+          <b class="num">{{ String(index + 1).padStart(2, '0') }}</b>
           <div>
             <h3>{{ step.title }}</h3>
             <p>{{ step.text }}</p>
           </div>
         </div>
-      </NModal>
+      </GameDialog>
       <SweepOverlay />
     </NMessageProvider>
   </NConfigProvider>

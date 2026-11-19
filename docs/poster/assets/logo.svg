@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 360">
+  <!-- 由 tools/make-logo.py 生成：盾框 16、括号 20、矛杆 16，长矛两侧留缝 9 -->
+  <defs>
+    <mask id="spear-gap" maskUnits="userSpaceOnUse" x="0" y="0" width="360" height="360">
+      <rect width="360" height="360" fill="#fff"/>
+      <g fill="#000" stroke="#000" stroke-width="18" stroke-linejoin="round">
+        <polygon points="159.3,285.6 172.5,277.4 164.3,264.2 151.1,272.4"/><polygon points="155.3,267.3 170.9,270.9 198.1,153.0 182.6,149.4"/><polygon points="182.6,149.4 198.1,153.0 204.3,144.1 206.1,136.3 182.7,130.9 180.9,138.7"/><polygon points="193.1,130.3 185.3,128.5 171.4,95.5 220.0,22.6"/><polygon points="197.0,131.2 204.8,133.0 231.8,109.4 220.0,22.6"/>
+      </g>
+    </mask>
+  </defs>
+  <g mask="url(#spear-gap)" fill="none" stroke="#fff" stroke-linejoin="miter" stroke-miterlimit="4">
+    <g stroke-width="16">
+      <polyline points="44.0,188.0 44.0,94.0 74.0,64.0 286.0,64.0 316.0,94.0 316.0,188.0"/>
+      <polyline points="44.0,206.0 180.0,342.0 316.0,206.0"/>
+    </g>
+    <g stroke-width="20">
+      <polyline points="140.0,144.0 88.0,196.0 140.0,248.0"/>
+      <polyline points="220.0,144.0 272.0,196.0 220.0,248.0"/>
+    </g>
+  </g>
+  <g fill="#fff">
+    <polygon points="159.3,285.6 172.5,277.4 164.3,264.2 151.1,272.4"/><polygon points="155.3,267.3 170.9,270.9 198.1,153.0 182.6,149.4"/><polygon points="182.6,149.4 198.1,153.0 204.3,144.1 206.1,136.3 182.7,130.9 180.9,138.7"/><polygon points="193.1,130.3 185.3,128.5 171.4,95.5 220.0,22.6"/><polygon points="197.0,131.2 204.8,133.0 231.8,109.4 220.0,22.6"/>
+  </g>
+</svg>

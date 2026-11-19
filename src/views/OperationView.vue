@@ -1,11 +1,12 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NModal, NSpin, useMessage } from 'naive-ui'
+import { NSpin, useMessage } from 'naive-ui'
 import {
   Check,
   Code2,
   FileText,
+  Flag,
   Play,
   RotateCw,
   Send,
@@ -17,22 +18,34 @@ import {
   ChevronDown,
   Hourglass,
   LoaderCircle,
-  Timer,
-  Maximize,
+  LogOut,
+  Ellipsis,
+  SlidersHorizontal,
 } from 'lucide-vue-next'
 import { api } from '../api.js'
-import { indicators, selectionErrors, checksFor, senseLevel, submitGraceMs } from '../../shared/contracts.js'
-import { languages } from '../../shared/languages.js'
+import {
+  contractById,
+  levelNames,
+  pointsOf,
+  senseLevel,
+  submitGraceMs,
+} from '../../shared/contracts.js'
+import { languageById, templates } from '../../shared/languages.js'
+import { phaseLabels } from '../../shared/labels.js'
 import { checkContracts } from '../../shared/checks.js'
 import { best } from '../state.js'
 import { readDraft, writeDraft } from '../drafts.js'
+import { sweep } from '../sweep.js'
 import { useIntegrity } from '../integrity.js'
 import UiButton from '../components/UiButton.vue'
-import UiMenu from '../components/UiMenu.vue'
 import CodeEditor from '../components/CodeEditor.vue'
 import MarkdownContent from '../components/MarkdownContent.vue'
 import IndicatorPopover from '../components/IndicatorPopover.vue'
 import EditorSenses from '../components/EditorSenses.vue'
+import ContractPanel from '../components/ContractPanel.vue'
+import GameDialog from '../components/GameDialog.vue'
+import IntelDialog from '../components/IntelDialog.vue'
+import Digits from '../components/Digits.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -41,21 +54,41 @@ const operation = ref(null)
 const error = ref('')
 const loading = ref(true)
 const source = ref('')
-const language = ref('cpp')
 const running = ref('')
 const result = ref(null)
-const checked = ref(null)
 const codeEditor = ref(null)
-const analyzed = ref({ source: '', facts: { bytes: 0 } })
+const preview = ref('')
+const adjusting = ref(false)
+const panelReady = ref(false)
+const confirmOpen = ref(false)
+const intelOpen = ref(false)
+const facts = ref({})
 const cursor = ref({ line: 1, column: 1, selected: 0 })
 const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl+'
 const operationId = route.params.id
+
+const round = computed(() => operation.value?.rounds[operation.value.current])
+const language = computed(() => round.value?.language)
+const phase = computed(() => round.value?.phase)
+const question = computed(() => round.value?.question)
+const active = computed(() => phase.value === 'active')
+const lastRound = computed(() => operation.value && operation.value.current === operation.value.rounds.length - 1)
+const shownQuestion = computed(() =>
+  phase.value === 'choosing'
+    ? round.value.choices.find((item) => item.id === preview.value)
+    : question.value,
+)
+const ids = computed(() => (active.value ? round.value.contracts : []))
+const points = computed(() => pointsOf(round.value?.contracts || []))
+const masked = computed(() => senseLevel(ids.value))
+const pad = (value) => String(value).padStart(2, '0')
+
 let baseline = ''
 let draftTimer = 0
 function saveDraft() {
   clearTimeout(draftTimer)
-  if (!operation.value || source.value === baseline) return true
-  if (!writeDraft(language.value, source.value)) return false
+  if (!question.value || source.value === baseline) return true
+  if (!writeDraft(question.value.id, language.value, source.value)) return false
   baseline = source.value
   return true
 }
@@ -68,53 +101,103 @@ function save() {
   else message.error('草稿保存失败，请检查浏览器本地存储')
 }
 function latestSource(lang) {
-  const { submission, question } = operation.value
+  const { submission } = round.value
   const submitted = submission?.language === lang && {
     source: submission.source,
     savedAt: Date.parse(submission.submittedAt),
   }
-  const draft = readDraft(lang)
+  const draft = readDraft(question.value.id, lang)
   const latest = draft && (!submitted || draft.savedAt > submitted.savedAt) ? draft : submitted
-  return latest ? latest.source : question.templates[lang]
+  return latest ? latest.source : templates[lang]
 }
-function open(lang) {
-  language.value = lang
-  source.value = baseline = latestSource(lang)
+function apply(next) {
+  const previous = round.value
+  saveDraft()
+  operation.value = next
+  clockOffset.value = next.serverTime - Date.now()
+  const current = round.value
+  if (
+    !previous ||
+    previous.index !== current.index ||
+    previous.question?.id !== current.question?.id ||
+    previous.language !== current.language
+  ) {
+    source.value = baseline = current.question ? latestSource(current.language) : ''
+    preview.value = current.choices?.[0]?.id || ''
+  }
+  const { submission } = current
+  result.value =
+    submission?.source === source.value &&
+    submission.language === current.language &&
+    submission.contracts.length === current.contracts.length &&
+    submission.contracts.every((id) => current.contracts.includes(id))
+      ? submission.result
+      : null
 }
+
 const resultAccepted = computed(
   () =>
     result.value && (result.value.mode === 'sample' ? result.value.verdict === 'AC' : result.value.passed),
 )
 const passedCases = computed(() => result.value?.cases.filter((item) => item.verdict === 'AC').length || 0)
-const ids = computed(() => operation.value?.question.contracts || [])
-const masked = computed(() => senseLevel(ids.value))
 
 const clockOffset = ref(0)
 const now = ref(Date.now())
-const settlement = ref(null)
 const settlementOpen = ref(false)
-const deadline = computed(() => operation.value?.deadline && Date.parse(operation.value.deadline))
+const finished = computed(() => Boolean(operation.value?.finishedAt))
+const deadline = computed(() => operation.value && Date.parse(operation.value.deadline))
 const remaining = computed(() => deadline.value && Math.max(0, deadline.value - now.value - clockOffset.value))
-const ended = computed(() => remaining.value === 0)
+const timeUp = computed(() => remaining.value === 0)
+const ended = computed(() => finished.value || timeUp.value)
+const urgent = computed(() => remaining.value < 300_000)
 const countdown = computed(() => {
   const seconds = Math.ceil(remaining.value / 1000)
-  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+  return `${pad(Math.floor(seconds / 60))}:${pad(seconds % 60)}`
 })
 let clock = 0
 let task = Promise.resolve()
-async function settle() {
+let refreshTimer = 0
+async function refreshSettlement() {
+  if (!clock || finished.value) return
+  try {
+    apply(await api.operation(operationId))
+  } catch (e) {
+    message.error(e.message)
+  }
+  if (clock && !finished.value) {
+    const untilGraceEnds = deadline.value + submitGraceMs - Date.now() - clockOffset.value
+    refreshTimer = setTimeout(refreshSettlement, Math.max(3000, untilGraceEnds + 100))
+  }
+}
+watch(timeUp, async (value) => {
+  if (!value || finished.value) return
+  adjusting.value = false
+  confirmOpen.value = false
+  const version = operation.value.version
+  const submitting = running.value === 'submit'
   await task
-  const { submission } = operation.value
-  const settled = submission && Date.parse(submission.submittedAt) >= deadline.value
   const overdue = Date.now() + clockOffset.value - deadline.value
-  const final = !settled && overdue < submitGraceMs ? await run('submit', true) : null
+  if (!clock || finished.value) return
+  if (
+    !submitting &&
+    active.value &&
+    operation.value.version === version &&
+    overdue < submitGraceMs &&
+    source.value.trim()
+  )
+    await act('submit', { source: source.value })
+  await refreshSettlement()
+})
+watch(finished, async (value) => {
+  if (!value) return
+  adjusting.value = confirmOpen.value = false
   try {
     best.value = (await api.record()).score
-  } catch {}
-  settlement.value = { score: final?.score ?? null, best: best.value }
+  } catch (e) {
+    message.error(e.message)
+  }
   settlementOpen.value = true
-}
-watch(ended, (value) => value && settle())
+})
 
 const live = computed(() => Boolean(operation.value) && !ended.value)
 const integrity = useIntegrity(operationId, {
@@ -123,8 +206,7 @@ const integrity = useIntegrity(operationId, {
 })
 const { fullscreen } = integrity
 const fullscreenRequired = computed(() => live.value && integrity.supported && !fullscreen.value)
-const facts = computed(() => analyzed.value.facts)
-const localChecks = computed(() => checkContracts(ids.value, facts.value, analyzed.value.source))
+const localChecks = computed(() => checkContracts(ids.value, facts.value, source.value))
 const marks = computed(() =>
   localChecks.value
     .filter((check) => check.status === 'failed')
@@ -133,19 +215,8 @@ const marks = computed(() =>
     ),
 )
 const checks = computed(() => {
-  const local = localChecks.value
-  return indicators
-    .filter((item) => ids.value.includes(item.id))
-    .sort((a, b) => a.column - b.column)
-    .map((item) => {
-      const live = local.find((check) => check.id === item.id)
-      const check =
-        result.value?.checks.find((check) => check.id === item.id) ||
-        (live.status === 'pending'
-          ? checked.value?.checks.find((check) => check.id === item.id) || live
-          : live)
-      return { ...item, ...check }
-    })
+  const statuses = active.value && result.value?.checks.length ? result.value.checks : localChecks.value
+  return statuses.map((check) => ({ ...contractById[check.id], ...check })).sort((a, b) => a.column - b.column)
 })
 const actions = [
   { key: 'sample', kind: 'dark', icon: Play, label: '运行样例', shortcut: `${mod}Enter` },
@@ -154,70 +225,55 @@ const actions = [
 const failedChecks = computed(() => checks.value.filter((item) => item.status === 'failed'))
 const statusLabels = { passed: '符合', failed: '未满足', pending: '待验证', manual: '自主遵守' }
 const statusIcons = { passed: Check, failed: X, pending: Hourglass }
-const languageName = computed(() => languages.find((item) => item.id === language.value)?.name)
-const languageOptions = computed(() =>
-  languages.map((item) => ({
-    label: item.name,
-    key: item.id,
-    disabled: selectionErrors(ids.value, item.id).length > 0,
-  })),
-)
+const languageName = computed(() => languageById[language.value]?.name)
 const mib = (bytes) => (bytes / 1048576).toFixed(2)
-const codeLines = computed(() => facts.value.codeLines ?? checked.value?.codeLines ?? '—')
+const sourceBytes = computed(() => facts.value.bytes ?? result.value?.sourceBytes ?? '—')
+const codeLines = computed(() => facts.value.codeLines ?? result.value?.codeLines ?? '—')
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    operation.value = await api.operation(operationId)
-    clockOffset.value = operation.value.serverTime - Date.now()
-    integrity.record('open')
-    const submitted = operation.value.submission
-    open(
-      [history.state?.language, submitted?.language].find(
-        (lang) => lang && !selectionErrors(ids.value, lang).length,
-      ) || operation.value.language,
-    )
-    result.value =
-      submitted?.language === language.value && submitted.source === source.value ? submitted.result : null
-    checked.value = result.value
+    const first = !operation.value
+    apply(await api.operation(operationId))
+    if (first) integrity.record('open')
   } catch (e) {
     error.value = e.message
   } finally {
     loading.value = false
   }
 }
-function changeLanguage(value) {
-  if (value === language.value) return
-  saveDraft()
-  history.replaceState({ ...history.state, language: value }, '')
-  open(value)
+const toggleView = () =>
+  sweep(() => {
+    if (ended.value) return
+    panelReady.value = true
+    adjusting.value = !adjusting.value
+  })
+function adjust(indicators, language) {
+  return act('contracts', { indicators, language })
 }
+const confirmation = computed(() =>
+  lastRound.value
+    ? { title: '结束作战', text: '本回合记 0 分，作战立即结算。' }
+    : { title: '放弃本回合', text: `本回合记 0 分，直接进入第 ${round.value.index + 2} 回合。` },
+)
+function abandon() {
+  confirmOpen.value = false
+  act('abandon')
+}
+const leave = () => (ended.value ? router.push('/') : (confirmOpen.value = true))
 watch(
   [source, language, codeEditor],
   ([code, lang, editor], [oldCode, oldLang], onCleanup) => {
     if (code !== oldCode || lang !== oldLang) {
       result.value = null
-      if (checked.value)
-        checked.value = {
-          ...checked.value,
-          checks: checked.value.checks.filter(
-            (check) => !checksFor(check.id).some((rule) => rule.type === 'maxMemory'),
-          ),
-        }
+      facts.value = {}
     }
     if (!editor) return
     let current = true
     const timer = setTimeout(async () => {
       const next = await editor.analyze(code, lang)
       if (!current) return
-      analyzed.value = { source: code, facts: next }
-      checked.value = {
-        checks: checkContracts(ids.value, next, code).map((check) =>
-          check.status === 'pending'
-            ? checked.value?.checks.find((previous) => previous.id === check.id) || check
-            : check,
-        ),
-      }
+      facts.value = next
     }, 150)
     onCleanup(() => {
       current = false
@@ -228,33 +284,41 @@ watch(
 )
 const blocked = (action) =>
   ended.value ||
-  (Boolean(running.value) && running.value !== action) ||
+  Boolean(running.value) ||
   (action === 'submit' && failedChecks.value.length > 0)
 const hint = (action) =>
   ended.value
-    ? '作战时限已到'
+    ? '作战已结束'
     : action.key === 'submit' && failedChecks.value.length
-    ? `未满足${failedChecks.value.map((item) => `「${item.name}」`).join('')}，暂不可提交`
-    : action.shortcut
-function run(action, final = false) {
-  if (running.value || (!final && blocked(action))) return task
-  task = execute(action)
+      ? `未满足${failedChecks.value.map((item) => `「${item.name}」`).join('')}，暂不可提交`
+      : action.shortcut
+function run(action) {
+  if (!active.value || blocked(action)) return
+  result.value = null
+  return act(action, { source: source.value })
+}
+function act(action, fields) {
+  if (running.value || finished.value || (timeUp.value && action !== 'submit')) return task
+  running.value = action
+  task = execute(action, fields)
   return task
 }
-async function execute(action) {
-  const errors = selectionErrors(ids.value, language.value)
-  if (errors.length) return message.warning(errors.join('；'))
-  running.value = action
-  result.value = null
+async function execute(action, fields) {
   try {
-    result.value = await api[action](operationId, { source: source.value, language: language.value })
-    checked.value = result.value
-    if (action === 'submit') {
-      best.value = (await api.record()).score
-      message.success('提交已记录')
+    const index = round.value.index
+    const response = await api.roundAction(operation.value, action, fields)
+    if (action === 'sample') {
+      if (fields.source === source.value) result.value = response
+      return
     }
-    return result.value
+    apply(response)
+    if (action === 'submit') {
+      const { passed, score } = response.rounds[index].submission.result
+      if (passed) message.success(`第 ${index + 1} 回合通过，+${score} 分`)
+      else if (!ended.value) message.warning('本回合尚未通过，可修改后再次提交')
+    }
   } catch (error) {
+    if (error.status === 409) await load()
     message.error(error.message)
   } finally {
     running.value = ''
@@ -267,6 +331,8 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   clearInterval(clock)
+  clock = 0
+  clearTimeout(refreshTimer)
   removeEventListener('pagehide', saveDraft)
   saveDraft()
 })
@@ -283,230 +349,286 @@ onBeforeUnmount(() => {
       <UiButton kind="primary" @click="load"><RotateCw :size="16" />重新连接</UiButton>
     </div>
 
-    <div v-else class="terminal-layout" :class="{ 'has-effects': checks.length }">
-      <article class="panel brief-panel">
-        <header class="panel-heading">
-          <h1>{{ operation.question.title }}</h1>
-          <span class="limits num"
-            >{{ operation.question.timeLimitMs }} ms ·
-            {{ operation.question.memoryLimitBytes / 1048576 }} MiB</span
-          >
-        </header>
-        <div v-scroll-fade class="brief-content">
-          <MarkdownContent :content="operation.question.content" />
-        </div>
-      </article>
-
-      <section class="panel work-panel" aria-label="代码编辑与验证">
-        <header class="panel-heading">
-          <h2><Code2 :size="18" />代码编辑</h2>
-          <div class="editor-tools">
-            <EditorSenses :masked="masked" />
-            <UiMenu
-              v-slot="{ toggle }"
-              :options="languageOptions"
-              :disabled="Boolean(running) || ended"
-              placement="bottom-end"
-              max-height="min(440px, 60vh)"
-              @select="changeLanguage"
-            >
-              <button
-                class="language-select"
-                :disabled="Boolean(running) || ended"
-                :aria-label="`编程语言：${languageName}`"
-                @click="toggle"
+    <template v-else>
+      <div v-show="!adjusting" class="terminal-layout" :class="{ 'has-effects': checks.length }">
+        <article class="panel brief-panel">
+          <header class="panel-heading">
+            <ol class="round-steps" aria-label="回合进度">
+              <li
+                v-for="item in operation.rounds"
+                :key="item.index"
+                :class="[item.phase, { current: item.index === operation.current && !finished }]"
+                :title="`第 ${item.index + 1} 回合 · ${phaseLabels[item.phase]}`"
               >
-                {{ languageName }}<ChevronDown :size="16" />
-              </button>
-            </UiMenu>
+                {{ levelNames[item.index] }}
+              </li>
+            </ol>
+            <h1>{{ shownQuestion?.title || '未选题' }}</h1>
+            <span v-if="shownQuestion" class="limits"
+              >{{ shownQuestion.timeLimitMs }} ms · {{ shownQuestion.memoryLimitBytes / 1048576 }} MiB</span
+            >
+          </header>
+          <div v-if="shownQuestion" :key="shownQuestion.id" v-scroll-fade class="brief-content">
+            <MarkdownContent :content="shownQuestion.content" />
           </div>
-        </header>
+        </article>
 
-        <div class="editor-frame">
-          <CodeEditor
-            ref="codeEditor"
-            v-model="source"
-            :language="language"
-            :disabled="running ? '评测中，暂不可编辑' : ended ? '作战时限已到，代码已锁定' : ''"
-            :masked="masked"
-            :marks="marks"
-            @run="run"
-            @save="save"
-            @cursor="cursor = $event"
-          />
-        </div>
+        <section class="panel work-panel" aria-label="代码编辑与验证">
+          <header class="panel-heading">
+            <h2><Code2 :size="18" />{{ phase === 'choosing' ? '选择题目' : '代码编辑' }}</h2>
+            <div class="editor-tools">
+              <EditorSenses v-if="active" :masked="masked" />
+              <span class="editor-language">{{ languageName }}</span>
+            </div>
+          </header>
 
-        <details v-if="result" class="execution-result" :class="resultAccepted ? 'accepted' : 'rejected'">
-          <summary class="result-summary" aria-label="展开或收起评测详情">
-            <strong aria-live="polite">
-              <component :is="resultAccepted ? Check : X" :size="16" />{{ result.verdict }}
-              <small v-if="result.verdict === 'AC' && !resultAccepted">指标未满足</small>
-            </strong>
-            <span :title="result.mode === 'sample' ? '样例通过数 / 样例总数' : '通过数据 / 全部数据'"
-              ><ListChecks :size="14" /><i class="num"
-                >{{ passedCases }}/{{ result.totalCases ?? result.cases.length }}</i
-              ></span
-            >
-            <span title="最长运行时间"
-              ><Clock3 :size="14" /><i class="num">{{ result.timeMs.toFixed(1) }} ms</i></span
-            >
-            <span title="峰值内存"
-              ><MemoryStick :size="14" /><i class="num">{{ mib(result.memoryBytes) }} MiB</i></span
-            >
-            <b v-if="result.mode !== 'sample'" title="已获分 / 指标总分"
-              ><Trophy :size="14" /><i class="num"
-                >{{ result.score }}<small>/{{ result.maxScore }}</small></i
-              ></b
-            >
-            <ChevronDown class="result-chevron" :size="16" />
-          </summary>
-          <div class="result-details">
-            <pre v-if="result.message">{{ result.message }}</pre>
-            <table v-if="result.cases.length">
-              <thead>
-                <tr>
-                  <th>数据</th>
-                  <th>结果</th>
-                  <th>耗时</th>
-                  <th>内存</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="item in result.cases"
-                  :key="item.number"
-                  :class="{ failed: item.verdict !== 'AC' }"
-                >
-                  <td>#{{ item.number }}</td>
-                  <td>{{ item.verdict }}</td>
-                  <td>{{ item.timeMs.toFixed(1) }} ms</td>
-                  <td>{{ mib(item.memoryBytes) }} MiB</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </details>
-
-        <footer class="terminal-actions">
-          <div class="editor-status">
-            <span class="num"
-              >行 {{ cursor.line }}，列 {{ cursor.column
-              }}<template v-if="cursor.selected">（已选 {{ cursor.selected }}）</template></span
-            >
-            <span class="num" :title="`${facts.bytes} 字节 · ${codeLines} 有效行`">
-              <FileText :size="14" />{{ running ? '评测中…' : `${facts.bytes} B · ${codeLines} L` }}
-            </span>
-          </div>
-          <UiButton
-            v-for="action in actions"
-            :key="action.key"
-            :kind="action.kind"
-            class="run-button"
-            :class="{ busy: running === action.key }"
-            :disabled="blocked(action.key)"
-            :aria-busy="running === action.key"
-            :title="hint(action)"
-            @click="run(action.key)"
-          >
-            <component
-              :is="running === action.key ? LoaderCircle : action.icon"
-              :class="{ spin: running === action.key }"
-              :size="16"
-            />{{ action.label }}
-          </UiButton>
-        </footer>
-      </section>
-
-      <aside v-if="checks.length" class="effect-rail" aria-label="作战指标">
-        <div class="effects-score">
-          <img src="/assets/risk-level.webp" alt="" />
-          <span>指标总计</span>
-          <strong class="num">{{ String(operation.question.score).padStart(2, '0') }}</strong>
-        </div>
-        <ul v-scroll-fade class="effect-list">
-          <IndicatorPopover v-for="item in checks" :key="item.id" :item="item" placement="left">
-            <li
-              class="effect-tab"
-              :class="item.status"
-              tabindex="0"
-              :aria-label="`${item.name}，${statusLabels[item.status]}`"
-            >
-              <img :src="item.icon" alt="" />
-              <div class="effect-copy">
-                <b>{{ item.name }}</b>
-                <span class="level-badge" :data-level="item.level"
-                  >{{ item.level }}<img src="/assets/risk-level.webp" alt=""
-                /></span>
-              </div>
-              <component
-                :is="statusIcons[item.status]"
-                v-if="statusIcons[item.status]"
-                class="effect-status"
-                :size="20"
-                :stroke-width="2.5"
+          <template v-if="phase === 'choosing'">
+            <ul v-scroll-fade class="choice-list">
+              <li
+                v-for="(item, index) in round.choices"
+                :key="item.id"
+                class="selected-item"
+                :class="{ previewing: item.id === preview }"
+                tabindex="0"
+                @click="preview = item.id"
+                @keydown.enter="preview = item.id"
+              >
+                <span class="choice-index num">{{ pad(index + 1) }}</span>
+                <div class="selected-copy">
+                  <h3>{{ item.title }}</h3>
+                  <p>{{ item.category }}</p>
+                </div>
+              </li>
+            </ul>
+            <footer class="terminal-actions">
+              <UiButton kind="primary" :disabled="Boolean(running) || ended" @click="act('choose', { question: preview })"
+                ><Check :size="16" />选定此题</UiButton
+              >
+            </footer>
+          </template>
+          <template v-else-if="question">
+            <div class="editor-frame">
+              <CodeEditor
+                :key="round.index"
+                ref="codeEditor"
+                v-model="source"
+                :language="language"
+                :disabled="ended ? '作战已结束，代码已锁定' : running ? '请求处理中，暂不可编辑' : ''"
+                :masked="masked"
+                :marks="marks"
+                @run="run"
+                @save="save"
+                @cursor="cursor = $event"
               />
-            </li>
-            <template #hint>
-              <small :class="['effect-hint', item.status]">
+            </div>
+
+            <details v-if="result" class="execution-result" :class="resultAccepted ? 'accepted' : 'rejected'">
+              <summary class="result-summary" aria-label="展开或收起评测详情">
+                <strong aria-live="polite">
+                  <component :is="resultAccepted ? Check : X" :size="16" />{{ result.verdict }}
+                  <small v-if="result.verdict === 'AC' && !resultAccepted">指标未满足</small>
+                </strong>
+                <span :title="result.mode === 'sample' ? '样例通过数 / 样例总数' : '通过数据 / 全部数据'"
+                  ><ListChecks :size="14" /><i
+                    >{{ passedCases }}/{{ result.totalCases }}</i
+                  ></span
+                >
+                <span title="最长运行时间"
+                  ><Clock3 :size="14" /><i>{{ result.timeMs.toFixed(1) }} ms</i></span
+                >
+                <span title="峰值内存"
+                  ><MemoryStick :size="14" /><i>{{ mib(result.memoryBytes) }} MiB</i></span
+                >
+                <b v-if="result.mode !== 'sample'" title="已获分 / 指标总分"
+                  ><Trophy :size="14" /><i
+                    >{{ result.score }}<small>/{{ result.maxScore }}</small></i
+                  ></b
+                >
+                <ChevronDown class="result-chevron" :size="16" />
+              </summary>
+              <div class="result-details">
+                <pre v-if="result.message">{{ result.message }}</pre>
+                <table v-if="result.cases.length">
+                  <thead>
+                    <tr>
+                      <th>数据</th>
+                      <th>结果</th>
+                      <th>耗时</th>
+                      <th>内存</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="item in result.cases"
+                      :key="item.number"
+                      :class="{ failed: item.verdict !== 'AC' }"
+                    >
+                      <td>#{{ item.number }}</td>
+                      <td>{{ item.verdict }}</td>
+                      <td>{{ item.timeMs.toFixed(1) }} ms</td>
+                      <td>{{ mib(item.memoryBytes) }} MiB</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </details>
+
+            <footer class="terminal-actions">
+              <div class="editor-status">
+                <span
+                  >行 {{ cursor.line }}，列 {{ cursor.column }}<template v-if="cursor.selected"
+                    >（已选 {{ cursor.selected }}）</template
+                  ></span
+                >
+                <span :title="`${sourceBytes} 字节 · ${codeLines} 有效行`">
+                  <FileText :size="14" /><template v-if="running">评测中…</template
+                  ><template v-else>{{ sourceBytes }} B · {{ codeLines }} L</template>
+                </span>
+              </div>
+              <UiButton
+                v-for="action in actions"
+                :key="action.key"
+                :kind="action.kind"
+                :disabled="blocked(action.key)"
+                :aria-busy="running === action.key"
+                :title="hint(action)"
+                @click="run(action.key)"
+              >
+                <component
+                  :is="running === action.key ? LoaderCircle : action.icon"
+                  :class="{ spin: running === action.key }"
+                  :size="16"
+                />{{ action.label }}
+              </UiButton>
+            </footer>
+          </template>
+        </section>
+
+        <aside v-if="checks.length" class="effect-rail" aria-label="作战指标">
+          <div class="effects-score">
+            <img src="/assets/risk-level.webp" alt="" />
+            <span>指标总计</span>
+            <strong><Digits :value="pad(points)" /></strong>
+          </div>
+          <ul v-scroll-fade class="effect-list">
+            <IndicatorPopover v-for="item in checks" :key="item.id" :item="item" placement="left">
+              <li
+                class="effect-tab"
+                :class="item.status"
+                tabindex="0"
+                :aria-label="`${item.name}，${statusLabels[item.status]}`"
+              >
+                <img :src="item.icon" alt="" />
+                <div class="effect-copy">
+                  <b>{{ item.name }}</b>
+                  <span class="level-badge" :data-level="item.level"
+                    >{{ item.level }}<img src="/assets/risk-level.webp" alt=""
+                  /></span>
+                </div>
                 <component
                   :is="statusIcons[item.status]"
                   v-if="statusIcons[item.status]"
-                  :size="14"
+                  class="effect-status"
+                  :size="20"
                   :stroke-width="2.5"
-                />{{ statusLabels[item.status]
-                }}<template v-if="item.messages.length"> · {{ item.messages.join('；') }}</template>
-              </small>
-            </template>
-          </IndicatorPopover>
-        </ul>
-      </aside>
-    </div>
-
-    <Transition name="gate">
-      <div v-if="fullscreenRequired" class="fullscreen-gate" role="dialog" aria-modal="true" aria-labelledby="gate-title">
-        <Maximize :size="34" />
-        <h2 id="gate-title">作战需全程全屏进行</h2>
-        <p>退出全屏、切换窗口或标签页都会被记录，并随作战一同提交。</p>
-        <UiButton kind="primary" @click="integrity.enter">进入全屏，继续作战</UiButton>
-        <span v-if="deadline" class="gate-clock num"><Timer :size="15" />{{ countdown }}</span>
+                />
+              </li>
+              <template #hint>
+                <small :class="['effect-hint', item.status]">
+                  <component
+                    :is="statusIcons[item.status]"
+                    v-if="statusIcons[item.status]"
+                    :size="14"
+                    :stroke-width="2.5"
+                  />{{ statusLabels[item.status]
+                  }}<template v-if="item.messages.length"> · {{ item.messages.join('；') }}</template>
+                </small>
+              </template>
+            </IndicatorPopover>
+          </ul>
+        </aside>
       </div>
-    </Transition>
+      <ContractPanel
+        v-if="panelReady"
+        v-show="adjusting"
+        title="调整指标"
+        :ids="round.contracts"
+        :language="language"
+        lock-fixed
+        :inert="Boolean(running) || ended"
+        :aria-busy="Boolean(running)"
+        :question="question"
+        @change="adjust"
+        @start="toggleView"
+      />
+    </template>
 
-    <Teleport v-if="deadline" to="#header-status">
-      <span
-        class="countdown"
-        :class="{ urgent: remaining < 300_000 }"
-        :title="ended ? '作战时限已到' : '剩余作战时间，到时自动提交并结算'"
-        role="timer"
-        ><Timer :size="18" /><b class="num">{{ countdown }}</b></span
-      >
+    <Teleport to="#header-status">
+      <template v-if="operation">
+        <button type="button" class="hud-button hud-edit" :disabled="Boolean(running) || ended" :aria-pressed="adjusting" @click="toggleView">
+          <component :is="adjusting ? Code2 : SlidersHorizontal" :size="17" />{{ adjusting ? '返回作战' : '编辑指标' }}
+        </button>
+        <span class="hud-divider" />
+        <button
+          type="button"
+          class="hud-button hud-contracts"
+          :aria-label="`指标总计 ${points}，查看综合情报`"
+          @click="intelOpen = true"
+        >
+          <img src="/assets/risk-level.webp" alt="" /><b>{{ points }}</b><Ellipsis :size="18" />
+        </button>
+        <span class="hud-clock" :class="{ urgent }" role="timer" :aria-label="`剩余作战时间 ${countdown}`"
+          ><Clock3 :size="20" /><b>{{ countdown }}</b></span
+        >
+      </template>
+    </Teleport>
+    <Teleport to="#header-tools">
+      <template v-if="operation">
+        <UiButton kind="dark" :disabled="Boolean(running)" @click="leave"
+          ><component :is="ended ? LogOut : Flag" :size="16" />{{
+            ended ? '返回指标选择' : confirmation.title
+          }}</UiButton
+        >
+      </template>
     </Teleport>
 
-    <NModal
-      v-model:show="settlementOpen"
-      preset="card"
-      class="game-modal"
-      title="作战结算"
-      :bordered="false"
-      style="width: 520px"
-    >
-      <div class="modal-kicker">TIME LIMIT REACHED</div>
-      <div v-if="settlement" class="intel-stats">
+    <IntelDialog v-if="operation" v-model:show="intelOpen" :ids="round.contracts" />
+
+    <GameDialog :show="fullscreenRequired" title="作战需全程全屏进行" :width="480" :closable="false">
+      <p>退出全屏、切换窗口或标签页都会被记录，并随作战一同提交。</p>
+      <template #actions>
+        <UiButton kind="primary" @click="integrity.enter">进入全屏，继续作战</UiButton>
+      </template>
+    </GameDialog>
+
+    <GameDialog v-if="operation" v-model:show="confirmOpen" :title="confirmation.title" :width="480">
+      <p>{{ confirmation.text }}</p>
+      <template #actions>
+        <UiButton kind="dark" @click="confirmOpen = false">取消</UiButton>
+        <UiButton kind="primary" @click="abandon">{{ confirmation.title }}</UiButton>
+      </template>
+    </GameDialog>
+
+    <GameDialog v-if="operation" v-model:show="settlementOpen" title="作战结算" :width="560">
+      <div class="intel-stats">
+        <div><strong>{{ operation.total }}</strong><span>累计成绩</span></div>
         <div>
-          <strong>{{ settlement.score ?? '—' }}</strong><span>本次结算</span>
+          <strong>{{ operation.rounds.filter((item) => item.phase === 'passed').length }}/{{ operation.rounds.length }}</strong
+          ><span>通过回合</span>
         </div>
-        <div>
-          <strong>{{ operation.question.score }}</strong><span>指标总计</span>
-        </div>
-        <div>
-          <strong>{{ settlement.best }}</strong><span>最终成绩 · 历史最高</span>
-        </div>
+        <div><strong>{{ best }}</strong><span>最高纪录</span></div>
       </div>
-      <footer class="settlement-actions">
+      <div class="intel-list">
+        <p v-for="item in operation.rounds" :key="item.index">
+          <b>{{ levelNames[item.index] }} · {{ item.question?.title || '—' }}</b>
+          <span>{{ phaseLabels[item.phase] }}<template v-if="item.phase === 'passed'"> · +{{ item.score }}</template></span>
+        </p>
+      </div>
+      <template #actions>
         <UiButton kind="dark" @click="settlementOpen = false">查看代码</UiButton>
         <UiButton kind="primary" @click="router.push('/')">返回指标选择</UiButton>
-      </footer>
-    </NModal>
+      </template>
+    </GameDialog>
   </main>
 </template>
 
@@ -514,10 +636,8 @@ onBeforeUnmount(() => {
 :global(.app-shell:has(.operation-view)) {
   min-width: 0;
 }
-.operation-view {
-  padding-top: var(--space-4);
-}
 .terminal-layout {
+  margin-top: var(--space-4);
   display: grid;
   grid-template-columns: minmax(300px, 0.8fr) minmax(0, 1.6fr);
   gap: var(--space-3);
@@ -553,8 +673,8 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  min-height: 56px;
-  padding: 10px 18px;
+  min-height: 44px;
+  padding: 4px 18px;
   border-bottom: 1px solid var(--line);
 }
 .panel-heading h1,
@@ -572,70 +692,146 @@ onBeforeUnmount(() => {
 .panel-heading h2 svg {
   color: var(--muted);
 }
-.countdown {
+.hud-button {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: #f3f3f1;
+  color: #2a2b2e;
+  font-size: 15px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px #0006;
+  transition:
+    background 0.15s,
+    transform 0.1s;
+}
+.hud-button:hover:not(:disabled) {
+  background: #fff;
+}
+.hud-button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.hud-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.hud-edit {
+  gap: 8px;
+  padding: 0 16px 0 12px;
+}
+.hud-divider {
+  width: 2px;
+  height: 22px;
+  margin: 0 12px;
+  background: #ffffff8c;
+}
+.hud-contracts {
+  gap: 8px;
+  padding: 0 8px 0 10px;
+  font-size: 18px;
+}
+.hud-contracts img {
+  width: 20px;
+  height: 22px;
+  filter: brightness(0);
+}
+.hud-contracts b {
+  min-width: 21px;
+  font-weight: 500;
+}
+.hud-contracts svg {
+  margin-left: 2px;
+  color: #8b8c90;
+}
+.hud-clock {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: var(--muted);
-}
-.countdown b {
+  margin-left: 18px;
   font-size: 20px;
-  font-weight: 400;
-  letter-spacing: 0.04em;
   color: var(--text);
   transition: color 0.2s;
 }
-.countdown.urgent b {
+.hud-clock b {
+  font-weight: 500;
+}
+.hud-clock.urgent {
   color: #ff4d6a;
 }
-.fullscreen-gate {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
+.round-steps {
+  flex: none;
+  display: flex;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.round-steps li {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 26px;
+  clip-path: polygon(22% 0, 78% 0, 100% 50%, 78% 100%, 22% 100%, 0 50%);
+  background: #ffffff14;
+  font: 400 15px/1 var(--font-num);
+  color: var(--muted);
+  transition:
+    background 0.2s,
+    color 0.2s;
+}
+.round-steps li.current {
+  background: var(--red);
+  color: #fff;
+}
+.round-steps li.passed {
+  background: #b9cf8a33;
+  color: var(--green);
+}
+.round-steps li.abandoned {
+  color: #5d5e60;
+}
+.brief-panel .panel-heading h1 {
+  flex: 1;
+}
+.choice-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin: 0;
+  padding: 16px 18px;
+  list-style: none;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  background: #0b0c0fd9;
-  backdrop-filter: blur(14px);
-  color: var(--soft);
-  text-align: center;
-}
-.fullscreen-gate > svg {
-  color: var(--orange);
-}
-.fullscreen-gate h2 {
-  font-size: 24px;
-  font-weight: 500;
-  color: var(--text);
-}
-.fullscreen-gate p {
-  margin-bottom: 8px;
-  font-size: 15px;
-  color: var(--muted);
-}
-.gate-clock {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
-  font-size: 16px;
-  color: var(--muted);
-}
-.gate-enter-active,
-.gate-leave-active {
-  transition: opacity 0.2s;
-}
-.gate-enter-from,
-.gate-leave-to {
-  opacity: 0;
-}
-.settlement-actions {
-  display: flex;
-  justify-content: flex-end;
   gap: 10px;
-  margin-top: 20px;
+}
+.choice-list .selected-item {
+  min-height: 0;
+  align-items: center;
+  padding: 16px 18px;
+  border-left: 3px solid transparent;
+  cursor: pointer;
+  outline: none;
+  transition:
+    border-color 0.15s,
+    filter 0.15s;
+}
+.choice-list .selected-item:hover,
+.choice-list .selected-item:focus-visible {
+  filter: brightness(1.08);
+}
+.choice-list .selected-item.previewing {
+  border-left-color: var(--red);
+}
+.choice-index {
+  font-size: 28px;
+  line-height: 1;
+  color: var(--muted);
+}
+.previewing .choice-index {
+  color: var(--red);
 }
 .limits {
   flex: none;
@@ -651,32 +847,12 @@ onBeforeUnmount(() => {
 .editor-tools {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
 }
-.language-select {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  width: 156px;
-  height: 36px;
-  padding: 0 14px 0 20px;
-  border: 0;
-  border-radius: 18px;
-  background: var(--light);
-  color: #2a2b2e;
-  font-size: 15px;
-  cursor: pointer;
-  transition: background 0.15s;
+.editor-language {
+  font-size: 14px;
+  color: var(--muted);
 }
-.language-select:hover:not(:disabled) {
-  background: #fff;
-}
-.language-select:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
 .editor-frame {
   flex: 1;
   min-height: 200px;
@@ -723,14 +899,16 @@ onBeforeUnmount(() => {
   color: var(--soft);
 }
 .result-summary > strong {
-  font: 400 18px var(--font-num);
+  font-size: 16px;
+  font-weight: 500;
   color: #ff6f86;
 }
 .accepted .result-summary > strong {
   color: var(--green);
 }
 .result-summary strong small {
-  font: 400 12px var(--font-sans);
+  font-size: 12px;
+  font-weight: 400;
   color: var(--muted);
 }
 .result-summary small {
@@ -765,12 +943,14 @@ onBeforeUnmount(() => {
 .result-details table {
   width: 100%;
   border-collapse: collapse;
-  font: 400 14px/1.5 var(--font-num);
+  font-size: 13px;
+  line-height: 1.5;
   color: var(--soft);
   text-align: left;
 }
 .result-details th {
-  font: 400 12px var(--font-sans);
+  font-size: 12px;
+  font-weight: 400;
   color: var(--muted);
 }
 .result-details td,
@@ -786,6 +966,7 @@ onBeforeUnmount(() => {
   flex: none;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
   padding: 10px 14px 10px 18px;
   border-top: 1px solid var(--line);
@@ -808,10 +989,6 @@ onBeforeUnmount(() => {
   min-width: 112px;
   height: 38px;
 }
-.run-button.busy {
-  pointer-events: none;
-}
-
 .effect-rail {
   --tuck: 16px;
   position: relative;
@@ -827,7 +1004,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 56px;
+  height: 44px;
   padding: 0 2px 0 calc(var(--tuck) + 14px);
 }
 .effects-score img {
@@ -835,7 +1012,7 @@ onBeforeUnmount(() => {
   height: 32px;
   opacity: 0.8;
 }
-.effects-score span {
+.effects-score > span {
   font-size: 14px;
   color: var(--soft);
 }

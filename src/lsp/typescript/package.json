@@ -1,0 +1,10 @@
+{
+  "name": "pioneer-typescript-worker",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@types/node": "20.17.47",
+    "typescript": "4.9.5",
+    "undici-types": "7.3.0"
+  }
+}

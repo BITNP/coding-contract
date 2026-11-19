@@ -9,5 +9,5 @@ const parts = computed(() => props.text.split(/(\d+(?:\.\d+)?(?:\s*(?:MiB|GiB|B|
 </template>
 
 <style scoped>
-.effect-number { color: #e0ad2a; font-family: var(--font-num); font-size: 1.06em; padding: 0 .08em }
+.effect-number { color: #e0ad2a; padding: 0 .08em }
 </style>

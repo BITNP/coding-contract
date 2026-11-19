@@ -8,11 +8,11 @@ function read() {
   }
 }
 
-export const readDraft = (language) => read()[language]
+export const readDraft = (question, language) => read()[`${question}:${language}`]
 
-export function writeDraft(language, source) {
+export function writeDraft(question, language, source) {
   const drafts = read()
-  drafts[language] = { source, savedAt: Date.now() }
+  drafts[`${question}:${language}`] = { source, savedAt: Date.now() }
   try {
     localStorage.setItem(key, JSON.stringify(drafts))
     return true

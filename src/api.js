@@ -3,7 +3,6 @@ const base = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
 async function request(path, options = {}) {
   const response = await fetch(`${base}${path}`, {
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
     ...options,
   })
   const data = await response.json()
@@ -12,7 +11,13 @@ async function request(path, options = {}) {
   return data
 }
 
-const post = (path, body) => request(path, { method: 'POST', body: JSON.stringify(body) })
+const post = (path, body, keepalive = false) =>
+  request(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    keepalive,
+  })
 
 export const api = {
   session: () => request('/session'),
@@ -21,11 +26,10 @@ export const api = {
   record: () => request('/records/best'),
   leaderboard: () => request('/leaderboard'),
   start: (ids, language) => post('/operations', { indicators: ids, language }),
+  current: () => request('/operations/current'),
   operation: (id) => request(`/operations/${id}`),
-  sample: (id, submission) => post(`/operations/${id}/sample`, submission),
-  submit: (id, submission) => post(`/operations/${id}/submit`, submission),
-  activity: (id, report, keepalive = false) =>
-    request(`/operations/${id}/activity`, { method: 'POST', body: JSON.stringify(report), keepalive }),
+  roundAction: ({ id, version }, action, fields) => post(`/operations/${id}/${action}`, { ...fields, version }),
+  activity: (id, report, keepalive) => post(`/operations/${id}/activity`, report, keepalive),
   adminOperations: (all) => request(`/admin/operations${all ? '?all=1' : ''}`),
   adminOperation: (id) => request(`/admin/operations/${id}`),
 }

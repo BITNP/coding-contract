@@ -10,17 +10,25 @@ class LspClient extends MonacoLspClient {
     for (const model of this._bridge._managedModels.values()) model.dispose()
     this.features.dispose()
     this._bridge.dispose()
-    this.transport.dispose()
   }
 }
 
-export async function connect(target, signal) {
-  signal.throwIfAborted()
-  const transport = createTransportToWorker(target)
-  const client = new LspClient(transport)
-  client.transport = transport
+export async function connect(target, signal, release) {
+  let transport
+  let client
   let onAbort
+  const stop = () => {
+    try {
+      client?.dispose()
+    } finally {
+      transport?.dispose()
+      release()
+    }
+  }
   try {
+    signal.throwIfAborted()
+    transport = createTransportToWorker(target)
+    client = new LspClient(transport)
     await Promise.race([
       client._initPromise,
       new Promise((_, reject) => {
@@ -29,11 +37,11 @@ export async function connect(target, signal) {
       }),
     ])
     signal.throwIfAborted()
-    return client
+    return stop
   } catch (error) {
-    client.dispose()
+    stop()
     throw error
   } finally {
-    signal.removeEventListener('abort', onAbort)
+    if (onAbort) signal.removeEventListener('abort', onAbort)
   }
 }

@@ -7,7 +7,7 @@ const syntaxLabels = {
   if: '不允许使用 if 条件语句',
   conditional: '不允许使用条件表达式',
 }
-const mib = (bytes) => `${(bytes / 1048576).toFixed(2)} MiB`
+const bytes = (value) => `${value.toLocaleString('zh-CN')} 字节`
 const at = (item, message) => ({
   message: `第 ${item.line} 行：${message}`,
   ranges: item.from === undefined ? [] : [{ from: item.from, to: item.to, message }],
@@ -50,10 +50,11 @@ const checkers = {
       )
       .map((item) => at(item, `不允许使用名称 ${item.name}`))
   },
-  maxMemory: (rule, facts) =>
-    facts.memoryExceeded || facts.memoryBytes > rule.limit
-      ? [`运行内存峰值为 ${mib(facts.memoryBytes)}，超出上限 ${mib(rule.limit)}`]
-      : [],
+  maxMemory(rule, facts) {
+    if (facts.memoryBytes > rule.limit)
+      return [`运行内存峰值为 ${bytes(facts.memoryBytes)}，超出上限 ${bytes(rule.limit)}`]
+    return facts.memoryExceeded ? [`沙箱返回内存超限，记录峰值为 ${bytes(facts.memoryBytes)}`] : []
+  },
 }
 
 const requiredFacts = {

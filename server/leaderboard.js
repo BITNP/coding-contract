@@ -1,18 +1,36 @@
 import { Router } from 'express'
 import { languageById } from '../shared/languages.js'
+import { roundSummary, currentRound } from './operations.js'
+
+export const rankingOrder = 'score DESC, duration_ms, finished_at, id'
 
 export function leaderboard(db) {
   const top = db.prepare(`
-    SELECT name, avatar, score, language, duration_ms AS durationMs, updated_at AS updatedAt FROM records
-    WHERE score > 0 AND name <> '' ORDER BY score DESC, duration_ms, updated_at LIMIT 50
+    WITH ranked AS (
+      SELECT id, score, duration_ms, finished_at,
+        row_number() OVER (PARTITION BY user_id ORDER BY ${rankingOrder}) AS personal_rank
+      FROM operations WHERE finished_at IS NOT NULL AND score > 0
+    ), leaders AS (
+      SELECT id FROM ranked WHERE personal_rank = 1 ORDER BY ${rankingOrder} LIMIT 50
+    )
+    SELECT data, duration_ms FROM leaders JOIN operations USING (id) ORDER BY ${rankingOrder}
   `)
   return Router().get('/', (_req, res) =>
     res.json(
-      top.all().map((row, index) => ({
-        rank: index + 1,
-        ...row,
-        language: languageById[row.language]?.name || row.language,
-      })),
+      top.all().map(({ data, duration_ms }, index) => {
+        const operation = JSON.parse(data)
+        const { name, avatar } = operation.user
+        return {
+          rank: index + 1,
+          name,
+          avatar,
+          score: operation.total,
+          language: languageById[currentRound(operation).language].name,
+          durationMs: duration_ms,
+          updatedAt: operation.finishedAt,
+          rounds: roundSummary(operation),
+        }
+      }),
     ),
   )
 }

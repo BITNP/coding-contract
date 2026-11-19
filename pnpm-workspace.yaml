@@ -1,4 +1,5 @@
 packages:
   - .
+  - src/lsp/typescript
 allowBuilds:
   esbuild: true
