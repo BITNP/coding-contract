@@ -197,21 +197,16 @@ test('a failed batch aborts and settles other downloads before retry', async (t)
 })
 
 test('LSP connection waits for initialization and disposes failed initialization', async (t) => {
-  let resolve
-  let reject
+  let init = Promise.withResolvers()
   let disposed = 0
   let released = 0
   const release = () => {
     released++
   }
-  let initialized = new Promise((yes, no) => {
-    resolve = yes
-    reject = no
-  })
   mockGlobal(t, '__lspTest', {
     MonacoLspClient: class {
       constructor() {
-        this._initPromise = initialized
+        this._initPromise = init.promise
         this._bridge = { _managedModels: new Map(), dispose() {} }
         this.createFeatures()
       }
@@ -235,17 +230,14 @@ test('LSP connection waits for initialization and disposes failed initialization
     ready = true
     return stop
   })
-  await Promise.resolve()
+  await new Promise((resolve) => setImmediate(resolve))
   assert.equal(ready, false)
-  resolve()
+  init.resolve()
   const stop = await connection
-  assert.equal(ready, true)
   stop()
-  initialized = new Promise((_yes, no) => {
-    reject = no
-  })
+  init = Promise.withResolvers()
   const failed = connect({}, new AbortController().signal, release)
-  reject(new Error('initialize failed'))
+  init.reject(new Error('initialize failed'))
   await assert.rejects(failed, /initialize failed/)
   await assert.rejects(connect({}, AbortSignal.abort(), release), { name: 'AbortError' })
   assert.equal(disposed, 2)

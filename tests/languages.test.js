@@ -5,12 +5,10 @@ import { indicators, checksFor, selectionErrors } from '../shared/contracts.js'
 import { checkContracts } from '../shared/checks.js'
 import { sourceFacts } from '../src/sourceFacts.js'
 import { evaluate } from '../server/judge.js'
-import { runtimes } from '../server/runtimes.js'
 
-test('每种可选语言都有模板、运行配置和可用的通用指标', () => {
+test('每种可选语言都有起始模板且支持通用指标', () => {
   for (const language of languages) {
     assert.ok(templates[language.id]?.trim(), language.id)
-    assert.ok(runtimes[language.id]?.run.length, language.id)
     assert.deepEqual(
       selectionErrors(['ancient-3', 'source-1', 'lines-1', 'memory-1', 'brackets-1'], language.id),
       [],

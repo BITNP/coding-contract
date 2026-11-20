@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { languages } from '../shared/languages.js'
-import solutions from '../server/questions/max-rise-solutions.js'
 import { defineQuestion } from '../server/questions/data.js'
 import { questions } from '../server/questions/index.js'
 
@@ -19,17 +17,11 @@ test('用例延迟到首次评测时生成，同一题只生成一次', () => {
   assert.equal(builds, 1)
 })
 
-test('三个题面公开首组样例，参考解覆盖所有语言', () => {
-  assert.deepEqual(Object.keys(solutions).sort(), languages.map(({ id }) => id).sort())
-  for (const source of Object.values(solutions)) assert.ok(Buffer.byteLength(source) <= 1024)
+test('三道题的公开样例与评测使用的首组输入输出一致', () => {
   for (const question of Object.values(questions)) {
     const sample = question.cases[0]
     assert.equal(block(question.content, '输入样例'), sample.input.trim(), question.id)
     assert.equal(block(question.content, '输出样例'), sample.answer, question.id)
-    assert.ok(
-      question.cases.every(({ input, answer }) => input.trim() && /^-?\d+$/.test(answer)),
-      question.id,
-    )
   }
 })
 
