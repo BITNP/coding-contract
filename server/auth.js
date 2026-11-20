@@ -4,6 +4,7 @@ import * as oidc from 'openid-client'
 
 const sessionAge = 24 * 60 * 60 * 1000
 const loginAge = 10 * 60 * 1000
+const roleRefreshAge = 5 * 60 * 1000
 const sessionCookie = 'pioneer_session'
 const loginCookie = 'pioneer_oidc'
 
@@ -60,7 +61,40 @@ export function createAuth(config, { discover = oidc.discovery, now = Date.now }
       .find((part) => part.startsWith(`${name}=`))
       ?.slice(name.length + 1)
   }
-  function authenticate(req, _res, next) {
+  function identity(claims) {
+    if (!claims?.sub) throw new Error('Missing subject')
+    const roles = claims.resource_access?.[config.clientId]?.roles
+    return {
+      id: claims.sub,
+      name: claims.name || claims.preferred_username || claims.sub,
+      avatar: claims.picture || null,
+      isAdmin: Array.isArray(roles) && roles.includes('admin'),
+    }
+  }
+  function refreshAt(tokens, claims) {
+    return (
+      now() +
+      Math.max(
+        0,
+        Math.min(
+          roleRefreshAge,
+          (tokens.expiresIn() ?? roleRefreshAge / 1000) * 1000,
+          claims.exp * 1000 - now(),
+        ) - 30_000,
+      )
+    )
+  }
+  async function refresh(session) {
+    if (!session.refreshToken) throw new Error('Missing refresh token')
+    const tokens = await oidc.refreshTokenGrant(await provider(), session.refreshToken)
+    const claims = tokens.claims()
+    const user = identity(claims)
+    if (user.id !== session.user.id) throw new Error('Subject changed during refresh')
+    session.user = user
+    session.refreshToken = tokens.refresh_token || session.refreshToken
+    session.refreshAt = refreshAt(tokens, claims)
+  }
+  async function authenticate(req, res, next) {
     const at = now()
     if (at >= nextPrune) {
       for (const map of [pending, sessions])
@@ -69,7 +103,22 @@ export function createAuth(config, { discover = oidc.discovery, now = Date.now }
     }
     req.sid = cookie(req, sessionCookie)
     const session = sessions.get(req.sid)
-    req.user = session && at < session.expiresAt ? session.user : null
+    req.user = null
+    // Logout must work even when the provider is unavailable or a refresh is in flight.
+    if (session && at < session.expiresAt && req.path !== '/api/auth/logout') {
+      try {
+        if (at >= session.refreshAt) {
+          session.refreshing ||= refresh(session).finally(() => {
+            session.refreshing = undefined
+          })
+          await session.refreshing
+        }
+        if (sessions.get(req.sid) === session && now() < session.expiresAt) req.user = session.user
+      } catch {
+        sessions.delete(req.sid)
+        res.clearCookie(sessionCookie, cookieOptions)
+      }
+    }
     next()
   }
   function requireUser(req, res, next) {
@@ -130,15 +179,15 @@ export function createAuth(config, { discover = oidc.discovery, now = Date.now }
         idTokenExpected: true,
       })
       const claims = tokens.claims()
-      if (!claims?.sub) throw new Error('Missing subject')
-      const user = {
-        id: claims.sub,
-        name: claims.name || claims.preferred_username || claims.sub,
-        avatar: claims.picture || null,
-      }
+      const user = identity(claims)
       sessions.delete(req.sid)
       const sid = randomUUID()
-      sessions.set(sid, { user, expiresAt: now() + sessionAge })
+      sessions.set(sid, {
+        user,
+        expiresAt: now() + sessionAge,
+        refreshToken: tokens.refresh_token,
+        refreshAt: refreshAt(tokens, claims),
+      })
       res.cookie(sessionCookie, sid, { ...cookieOptions, maxAge: sessionAge })
       res.redirect(login.returnTo)
     } catch {

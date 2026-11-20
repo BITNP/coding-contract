@@ -35,15 +35,14 @@ OIDC_REDIRECT_URL=https://oj.bitnp.net/api/auth/callback
 APP_PUBLIC_URL=https://oj.bitnp.net
 CORS_ORIGINS=https://oj.bitnp.net
 COOKIE_SAME_SITE=lax
-ADMIN_USERS=
 REFEREE_USERS=
 ```
 
-客户端启用 Standard Flow、关闭 Direct Access Grants，并要求 PKCE S256。密钥只保存在服务器环境文件中，已有客户端时先核对配置，避免覆盖。管理员和裁判名单填写 OIDC 的稳定 `sub`，多个 ID 以逗号分隔，可从已登录用户的 `/api/session` 响应读取 `user.id`。裁判端地址为 `/referee`，名单外账号无法进入。
+客户端启用 Standard Flow、关闭 Direct Access Grants，并要求 PKCE S256。密钥只保存在服务器环境文件中，已有客户端时先核对配置，避免覆盖。管理权限由 Keycloak 的 `coding-contract` client role `admin` 控制：`permission-techsvc-admin` 和 `permission-techdept-admin` 两个 realm role 的组合角色均包含它。配置角色、Scope 和 ID Token 映射的步骤见 [Keycloak 管理权限](docs/keycloak.md)。裁判名单填写 OIDC 的稳定 `sub`，多个 ID 以逗号分隔，可从已登录用户的 `/api/session` 响应读取 `user.id`；裁判端地址为 `/referee`，名单外账号无法进入。
 
 前端 `/api/` 必须反代到 API（包括 `/api/auth/login` 和 `/api/auth/callback`），回调地址须精确匹配。认证地址和站点地址使用 HTTPS；生产 Cookie 固定启用 Secure，不依赖代理头推断。
 
-登录后以 Keycloak 的 `sub` 保存用户记录，作战和最高分 API 都要求登录。会话保存在内存中，最长 24 小时，API 重启后需重新登录，退出仅注销本应用会话。生产服务要求完整的 OIDC 配置。本地开发可显式设置 `ALLOW_GUEST=1` 并留空四项 OIDC 参数，以共享访客身份体验作战、裁判台和管理台。
+登录后以 Keycloak 的 `sub` 保存用户记录，作战和最高分 API 都要求登录。会话保存在内存中，最长 24 小时，活跃请求最多每 5 分钟刷新令牌并重新计算管理权限；刷新失败需要重新登录。API 重启后需重新登录，退出仅注销本应用会话。生产服务要求完整的 OIDC 配置。本地开发可显式设置 `ALLOW_GUEST=1` 并留空四项 OIDC 参数，以共享访客身份体验作战、裁判台和管理台。
 
 ## 裁判核验
 
