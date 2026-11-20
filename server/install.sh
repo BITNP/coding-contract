@@ -2,18 +2,31 @@
 set -eu
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 source_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+app_only=0
+case "$#:${1:-}" in
+  0:) ;;
+  1:--app-only) app_only=1 ;;
+  *) echo 'Usage: sh server/install.sh [--app-only]' >&2; exit 1 ;;
+esac
 
 if [ ! -f /etc/pioneer/api.env ]; then
   echo '请先配置 /etc/pioneer/api.env 中的 OIDC 参数，再运行安装脚本。' >&2
   exit 1
 fi
 
-sh "$source_root/server/provision.sh"
-
 tools=/opt/pioneer/tools
 app=/opt/pioneer/app
-mkdir -p "$tools" "$app" /etc/pioneer
 node_version=24.22.2
+if [ "$app_only" = 1 ]; then
+  if [ ! -x "$tools/node-$node_version/bin/node" ] || [ ! -x "$tools/pnpm/bin/pnpm" ] ||
+     [ ! -d "$app/server/node_modules" ] || ! systemctl is-active --quiet go-judge; then
+    echo '--app-only 需要已安装的 Node、pnpm、API 依赖和运行中的 go-judge。' >&2
+    exit 1
+  fi
+else
+  sh "$source_root/server/provision.sh"
+fi
+mkdir -p "$tools" "$app" /etc/pioneer
 
 case "$(dpkg --print-architecture)" in
   arm64)
@@ -48,12 +61,20 @@ export npm_config_registry=https://registry.npmjs.org
 touch "$npm_config_globalconfig"
 pnpm_version=$(node -p "require(process.argv[1]).packageManager.split('@')[1]" "$source_root/server/package.json")
 if [ ! -x "$tools/pnpm/bin/pnpm" ] || [ "$(pnpm --version)" != "$pnpm_version" ]; then
+  if [ "$app_only" = 1 ]; then
+    echo '--app-only 不下载工具链，请先安装对应版本的 pnpm。' >&2
+    exit 1
+  fi
   npm install --global --prefix "$tools/pnpm" --no-audit --no-fund "pnpm@$pnpm_version"
 fi
 
 rsync -a --delete --exclude node_modules --exclude data --exclude .env "$source_root/server/" "$app/server/"
 rsync -a --delete "$source_root/shared/" "$app/shared/"
-CI=true pnpm --dir "$app/server" --ignore-workspace install --prod --frozen-lockfile --store-dir "$tools/pnpm-store"
+if [ "$app_only" = 1 ]; then
+  CI=true pnpm --dir "$app/server" --ignore-workspace install --offline --prod --frozen-lockfile --store-dir "$tools/pnpm-store"
+else
+  CI=true pnpm --dir "$app/server" --ignore-workspace install --prod --frozen-lockfile --store-dir "$tools/pnpm-store"
+fi
 api_url=$(cd "$app/server" && node --input-type=module -e '
   import { readFileSync } from "node:fs"
   import { parseEnv } from "node:util"
