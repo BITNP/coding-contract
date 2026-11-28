@@ -18,6 +18,7 @@ export const selectedIds = ref(validStored ? stored.indicators : defaultSelectio
 export const user = ref(null)
 export const best = ref(0)
 export const authAvailable = ref(false)
+export const isReferee = ref(false)
 export const connection = ref('connecting')
 
 // 卡片与提示共用同一份状态；提交作战时再由服务器校验。
@@ -32,12 +33,16 @@ export function indicatorStates(ids, language, lockFixed = false) {
       const hint =
         reason ||
         (selected
-          ? '点击取消选择'
+          ? item.verification === 'manual'
+            ? '点击取消选择 · 需线下裁判核验'
+            : '点击取消选择'
           : conflict
             ? '与同组指标冲突，点击替换'
             : item.key
               ? '选入后开放带锁标记的指标'
-              : '点击选入')
+              : item.verification === 'manual'
+                ? '点击选入 · 需线下裁判核验'
+                : '点击选入')
       return [item.id, { selected, locked: Boolean(reason), conflict, hint }]
     }),
   )
@@ -57,6 +62,7 @@ export async function refreshSession() {
     const session = await api.session()
     user.value = session.user
     authAvailable.value = session.authAvailable
+    isReferee.value = Boolean(session.referee)
     best.value = session.authAvailable && !session.user ? 0 : (await api.record()).score
     connection.value = 'online'
   } catch {

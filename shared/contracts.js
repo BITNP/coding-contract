@@ -225,6 +225,21 @@ export const submitGraceMs = 90_000
 
 export const pointsOf = (ids) => ids.reduce((sum, id) => sum + contractById[id].points, 0)
 
+// 线下核验：verification 为 manual 的词条无法由评测机判断，只能由现场裁判确认。
+// 依赖这些词条的条款（requires）同样无法自动核验，未配对时一并失去有效分。
+function dependsOnManual(id, seen = new Set()) {
+  if (seen.has(id)) return false
+  seen.add(id)
+  const item = contractById[id]
+  if (item.verification === 'manual') return true
+  return item.requires.some((required) => dependsOnManual(required, seen))
+}
+
+export const manualContracts = (ids) => ids.filter((id) => contractById[id].verification === 'manual')
+export const requiresReferee = (ids) => ids.some((id) => dependsOnManual(id))
+export const automaticPoints = (ids) =>
+  ids.filter((id) => !dependsOnManual(id)).reduce((sum, id) => sum + contractById[id].points, 0)
+
 export const timeLimit = (ids) =>
   operationMinutes - ids.reduce((sum, id) => sum + (contractById[id].minutes || 0), 0)
 

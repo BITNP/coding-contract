@@ -1,22 +1,8 @@
 import { Router } from 'express'
-import { flaggedActivity } from '../shared/labels.js'
 import { questions } from './questions/index.js'
+import { awayMs, flaggedCounts } from './activity.js'
 
 const window24h = 24 * 60 * 60 * 1000
-
-function awayMs(events) {
-  const spans = events
-    .filter((event) => (event.type === 'visible' || event.type === 'focus') && event.detail > 0)
-    .map((event) => [event.at - event.detail, event.at])
-    .sort((a, b) => a[0] - b[0])
-  let total = 0
-  let end = -Infinity
-  for (const [from, to] of spans) {
-    total += Math.max(0, to - Math.max(from, end))
-    end = Math.max(end, to)
-  }
-  return total
-}
 
 export function createAdminRouter({ db, auth, admins = process.env.ADMIN_USERS }) {
   const allowed = new Set(
@@ -41,8 +27,7 @@ export function createAdminRouter({ db, auth, admins = process.env.ADMIN_USERS }
 
   function summarize(operation, now, detail = false) {
     const { events, submission, live } = operation
-    const flags = Object.fromEntries(flaggedActivity.map((type) => [type, 0]))
-    for (const event of events) if (Object.hasOwn(flags, event.type)) flags[event.type]++
+    const flags = flaggedCounts(events)
     const current =
       !submission || (!operation.finishedAt && live?.at > submission.submittedAt) ? live : submission
     const settings = operation.finishedAt && submission ? submission : operation

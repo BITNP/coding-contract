@@ -149,7 +149,12 @@ test('拒绝过期评测，答错后可换题，任意一题通过即按当前�
   assert.equal((await request(`${path}/sample`, next)).cases.length, 1)
   const passed = await request(`${path}/submit`, next)
   assert.equal(passed.phase, 'passed')
-  assert.equal(passed.score, 3)
+  assert.equal(passed.needsReferee, true)
+  assert.equal(passed.referee, null)
+  assert.equal(passed.review, null)
+  // ancient-1 需线下核验且未配对，只有 source-2 计入有效成绩。
+  assert.equal(passed.selectedScore, 3)
+  assert.equal(passed.score, 2)
   assert.equal(passed.submission.question, 'maze')
   assert.equal(passed.submission.result.totalCases, maze.cases.length)
   await request(`${path}/submit`, { ...next, version: passed.version, question: 'max-rise' }, 403)

@@ -1,7 +1,12 @@
 import { openDatabase, transaction } from '../server/database.js'
 import { createOperation, finishOperation } from '../server/operations.js'
 import { questions } from '../server/questions/index.js'
-import { contractById, pruneUnavailable } from '../shared/contracts.js'
+import {
+  contractById,
+  pointsOf,
+  pruneUnavailable,
+  requiresReferee,
+} from '../shared/contracts.js'
 import { templates } from '../shared/languages.js'
 
 const full = [
@@ -102,6 +107,12 @@ function play(id, [name, language, selection, phase = 'passed', events = []], st
     user: { id, name, avatar: null },
     now: start,
   })
+  // 含古法编程等线下核验条款的作战，部分由值班裁判接入，部分保持未配对以演示有效分差异。
+  // 访客模式下 preview 即当前访客，另一半用其他裁判 id 方便演示「全部裁判」视图。
+  const needsReferee = requiresReferee(operation.contracts)
+  const referee = seed % 2 ? { id: 'preview', name: '访客' } : { id: 'demo-referee', name: '值班裁判' }
+  if (needsReferee && seed % 3 !== 0)
+    operation.referee = { ...referee, at: iso(start + minute) }
   const choices = Object.values(questions)
   const question = choices[seed % choices.length]
   const deadline = Date.parse(operation.deadline)
@@ -115,6 +126,15 @@ function play(id, [name, language, selection, phase = 'passed', events = []], st
   }
   if (phase !== 'active')
     finishOperation(operation, phase, phase === 'expired' ? operation.deadline : iso(at))
+  // 已配对的通过成绩仍需核验：留几场待裁判确认，其余视为已确认。
+  if (operation.review?.status === 'pending' && seed % 4 !== 0) {
+    operation.review = {
+      status: 'confirmed',
+      by: { id: operation.referee.id, name: operation.referee.name },
+      at: iso(Date.parse(operation.finishedAt) + 5 * minute),
+    }
+    operation.score = pointsOf(operation.contracts)
+  }
   operation.seenAt = iso(at)
   operation.live = { question: question.id, source: templates[language], language, at: operation.seenAt }
   operation.events = events.map(([type, detail], index) => {

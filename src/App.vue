@@ -2,9 +2,9 @@
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NConfigProvider, NMessageProvider, darkTheme } from 'naive-ui'
-import { CircleHelp, UserRound, ArrowUpRight, LogOut } from 'lucide-vue-next'
+import { CircleHelp, UserRound, ArrowUpRight, LogOut, Gavel } from 'lucide-vue-next'
 import { themeOverrides } from './theme'
-import { refreshSession, user, authAvailable, connection } from './state'
+import { refreshSession, user, authAvailable, isReferee, connection } from './state'
 import { api } from './api'
 import UiButton from './components/UiButton.vue'
 import SweepOverlay from './components/SweepOverlay.vue'
@@ -32,6 +32,10 @@ const helpSteps = [
   {
     title: '三选一',
     text: '从「最长升温」「迷宫寻路」「信道排班」中任选一道提交。通过前可自由切题，草稿按题目和编程语言分别保存在本机。',
+  },
+  {
+    title: '线下核验',
+    text: '含「古法编程」等需现场核验的条款时，可请裁判在裁判端接入并配对；未配对时，这些条款及其依赖条款不计入有效成绩。配对后仍需裁判确认成绩。',
   },
   {
     title: '结算',
@@ -72,6 +76,9 @@ async function signOut() {
           <div class="header-actions">
             <span v-if="connection === 'offline'" class="connection"><i />连接中断</span>
             <div id="header-tools" class="header-tools" />
+            <UiButton v-if="isReferee" kind="ghost" @click="router.push('/referee')"
+              ><Gavel :size="21" /><span>裁判台</span></UiButton
+            >
             <UiButton kind="ghost" icon-only aria-label="作战指引" @click="helpOpen = true"
               ><CircleHelp :size="23"
             /></UiButton>

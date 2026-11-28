@@ -28,9 +28,14 @@ export const api = {
   start: (ids, language) => post('/operations', { indicators: ids, language }),
   current: () => request('/operations/current'),
   operation: (id) => request(`/operations/${id}`),
+  pairing: (id) => request(`/operations/${id}/pairing`),
   operationAction: ({ id, version }, action, fields, signal) =>
     post(`/operations/${id}/${action}`, { ...fields, version }, { signal }),
   activity: (id, report, keepalive) => post(`/operations/${id}/activity`, report, { keepalive }),
   adminOperations: (all) => request(`/admin/operations${all ? '?all=1' : ''}`),
   adminOperation: (id) => request(`/admin/operations/${id}`),
+  refereeOperations: () => request('/referee/operations'),
+  refereeOperation: (id) => request(`/referee/operations/${id}`),
+  refereePair: (id) => post(`/referee/operations/${id}/pair`, {}),
+  refereeReview: (id, decision) => post(`/referee/operations/${id}/review`, { decision }),
 }

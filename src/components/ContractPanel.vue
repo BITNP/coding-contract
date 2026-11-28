@@ -51,6 +51,9 @@ const pad = (value) => String(value).padStart(2, '0')
 
 const selected = computed(() => props.ids.map((id) => contractById[id]))
 const score = computed(() => pointsOf(props.ids))
+const manualCount = computed(
+  () => selected.value.filter((item) => item.verification === 'manual').length,
+)
 const keyActive = computed(() => selected.value.some((item) => item.key))
 const change = (ids, language = props.language) => emit('change', ids, language)
 
@@ -166,7 +169,10 @@ function importCode() {
               <img :src="item.icon" alt="" class="selected-icon" />
             </div>
             <div class="selected-copy">
-              <h3>{{ item.name }}</h3>
+              <h3>
+                {{ item.name
+                }}<span v-if="item.verification === 'manual'" class="referee-badge">需线下核验</span>
+              </h3>
               <p><EffectText :text="item.description" /></p>
             </div>
             <button
@@ -187,6 +193,7 @@ function importCode() {
         </div>
         <div class="selected-summary">
           <span>已选指标<b>{{ pad(selected.length) }}</b></span>
+          <span v-if="manualCount" class="referee-count">含 {{ manualCount }} 项需裁判核验</span>
           <span v-if="keyActive" class="key-active"><LockOpen :size="14" />锁闭指标已激活</span>
         </div>
       </aside>

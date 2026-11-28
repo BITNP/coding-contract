@@ -4,7 +4,7 @@
 
 ## 认证与后端
 
-先运行 `sudo install -d -m 755 /etc/pioneer`。在 Keycloak 注册独立客户端，可参考 [客户端模板](../deploy/keycloak-client.json)。按 [统一认证说明](../README.md#网协统一认证) 配置 `/etc/pioneer/api.env`，权限为 `600`。服务默认监听 `127.0.0.1:3001`，数据目录为 `/var/lib/pioneer`。安装脚本在启动服务前检查 OIDC 配置，生产服务禁用访客模式。
+先运行 `sudo install -d -m 755 /etc/pioneer`。在 Keycloak 注册独立客户端，可参考 [客户端模板](../deploy/keycloak-client.json)。按 [统一认证说明](../README.md#网协统一认证) 配置 `/etc/pioneer/api.env`，权限为 `600`，并在 `REFEREE_USERS` 中填写裁判的 OIDC `sub`（多个用逗号分隔）。服务默认监听 `127.0.0.1:3001`，数据目录为 `/var/lib/pioneer`。安装脚本在启动服务前检查 OIDC 配置，生产服务禁用访客模式。
 
 上传 `server/` 和 `shared/` 到同一目录，执行：
 
@@ -46,7 +46,7 @@ sudo systemctl reload nginx
 
 ## 验证与更新
 
-确认 `nginx`、`pioneer-api`、`go-judge` 都处于 active 状态。浏览器完成统一登录后，`/api/session` 应返回当前用户；未登录的作战和记录 API 应返回 401。退出只清除本应用会话。
+确认 `nginx`、`pioneer-api`、`go-judge` 都处于 active 状态。浏览器完成统一登录后，`/api/session` 应返回当前用户；未登录的作战和记录 API 应返回 401。退出只清除本应用会话。裁判台 `/referee` 对 `REFEREE_USERS` 中的账号开放，名单外账号应返回 403。
 
 `server/install.sh` 会运行全部语言的样例自检。真实沙箱和部署端点的验证命令见[开发说明](development.md#验证)。
 

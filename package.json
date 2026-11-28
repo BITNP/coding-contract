@@ -11,6 +11,7 @@
     "bench:memory": "node dev/benchmark-memory.js",
     "seed:demo": "node dev/seed-demo.js",
     "judge:install": "node dev/install-judge.js",
+    "judge:mock": "node dev/mock-judge.js",
     "judge:start": "limactl start --tty=false pioneer-judge",
     "judge:stop": "limactl stop pioneer-judge"
   },
