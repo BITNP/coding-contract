@@ -20,6 +20,8 @@ sudo env GO_JUDGE_PROXY=http://127.0.0.1:8080 sh server/install.sh
 
 该变量只用于 go-judge 的 GitHub 下载，不影响 APT、Node、npm 或 Swift。代理监听地址需按实际环境替换。
 
+当前 `bitnp-oj` 已经以 native systemd 部署 Node、go-judge 和全部语言工具链，不需要 Docker/Podman 镜像。升级时复用这些组件，只替换应用代码和静态产物；Docker 镜像并不可复用于这台机器现有的 native 评测沙箱。
+
 ## 前端与 Nginx
 
 构建前端时省略 `VITE_API_BASE_URL`，使用同源 `/api`：
@@ -51,3 +53,61 @@ sudo systemctl reload nginx
 `server/install.sh` 会运行全部语言的样例自检。真实沙箱和部署端点的验证命令见[开发说明](development.md#验证)。
 
 更新后端时重跑安装脚本，保留 `/etc/pioneer/api.env` 和 `/var/lib/pioneer/`。更新前端时重新构建并替换静态产物。浏览器分别缓存 C/C++、Python 和 JS/TS 的语言服务资源。
+
+## 可回滚发布
+
+在构建机执行以下命令，会先构建前端，再生成包含 `server/`、`shared/`、`dist/` 和服务器脚本的发布包：
+
+```sh
+sh deploy/build-release.sh
+```
+
+发布包和 SHA-256 文件位于 `release/`。传到 `bitnp-oj` 后解压，并运行：
+
+```sh
+sudo sh deploy/server/update.sh
+```
+
+升级脚本只复用现有 Node、pnpm store、go-judge 和语言工具链，不会执行 `server/provision.sh`，也不会改动 `/var/lib/pioneer` 中的正式数据库。它会依次完成：
+
+1. 把旧应用、旧静态站、systemd/Nginx 配置和 SQLite 在线一致性备份保存到 `/var/backups/coding-contract/`。
+2. 在独立发布目录安装生产依赖，核对评测工具链版本，运行 17 种语言自检，并用临时数据库启动新版 API。
+3. 通过预检后切换 `/opt/pioneer/app` 和 `/var/www/coding-contract`，重启 `pioneer-api` 并重载 Nginx。
+4. 本机健康检查失败时自动恢复升级前应用和静态站。
+
+如切换后发现问题，可手动回滚：
+
+```sh
+sudo sh deploy/server/rollback.sh /var/backups/coding-contract/latest
+```
+
+回滚默认保留当前数据库，避免丢失升级后产生的新记录；备份中的 `contest.sqlite` 只用于需要整体灾难恢复且确认要丢弃新数据的情况。完整验收可运行：
+
+```sh
+sudo sh deploy/server/verify.sh
+```
+
+## 管理台与裁判权限
+
+角色配置单独保存在 `/etc/pioneer/roles.env`，不会和 OIDC 客户端密钥放在同一个文件。首次升级时，脚本会把 `api.env` 中已有的 `ADMIN_USERS`、`REFEREE_USERS` 复制过去；已有角色文件不会被覆盖。
+
+编辑配置：
+
+```sh
+sudoedit /etc/pioneer/roles.env
+```
+
+填写 Keycloak OIDC 的稳定 `sub`，多个账号用逗号分隔：
+
+```dotenv
+ADMIN_USERS=管理员的sub
+REFEREE_USERS=裁判一的sub,裁判二的sub
+```
+
+账号登录后可访问 `/api/session`，响应中的 `user.id` 就是对应 `sub`。修改角色后重启后端使配置生效：
+
+```sh
+sudo systemctl restart pioneer-api
+```
+
+重启会使所有用户重新登录。只修改角色时不需要重载 Nginx、修改 Traefik，也不需要重启 `go-judge`。
