@@ -2,27 +2,14 @@ import { Router } from 'express'
 import { automaticPoints, pointsOf, requiresReferee } from '../shared/contracts.js'
 import { questions } from './questions/index.js'
 import { awayMs, flaggedCounts } from './activity.js'
+import { mayAdmin } from './auth.js'
 import { transaction } from './database.js'
 
 const window24h = 24 * 60 * 60 * 1000
 const guest = { id: 'preview', name: '访客', avatar: null }
 const fail = (status, message) => Object.assign(new Error(message), { status })
 
-export function refereeRoster(value = process.env.REFEREE_USERS) {
-  return new Set(
-    (value || '')
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean),
-  )
-}
-
-// 访客模式（未配置 OIDC）下与 /admin 一致，直接开放裁判台。
-export function mayReferee(auth, user, roster) {
-  return !auth.available || Boolean(user && roster.has(user.id))
-}
-
-export function createRefereeRouter({ db, auth, roster = refereeRoster() }) {
+export function createRefereeRouter({ db, auth }) {
   const recent = db.prepare(
     'SELECT data FROM operations WHERE created_at >= ? ORDER BY created_at DESC',
   )
@@ -34,7 +21,7 @@ export function createRefereeRouter({ db, auth, roster = refereeRoster() }) {
   router.use((req, res, next) => {
     if (!auth.available) return next()
     if (!req.user) return res.status(401).json({ message: '请先统一登录' })
-    if (!roster.has(req.user.id)) return res.status(403).json({ message: '无裁判权限' })
+    if (!mayAdmin(auth, req.user)) return res.status(403).json({ message: '无管理权限' })
     next()
   })
 

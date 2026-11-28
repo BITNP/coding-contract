@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { questions } from './questions/index.js'
 import { awayMs, flaggedCounts } from './activity.js'
+import { mayAdmin } from './auth.js'
 
 const window24h = 24 * 60 * 60 * 1000
 
@@ -15,7 +16,7 @@ export function createAdminRouter({ db, auth }) {
   router.use((req, res, next) => {
     if (!auth.available) return next()
     if (!req.user) return res.status(401).json({ message: '请先统一登录' })
-    if (req.user.isAdmin !== true) return res.status(403).json({ message: '无管理权限' })
+    if (!mayAdmin(auth, req.user)) return res.status(403).json({ message: '无管理权限' })
     next()
   })
 

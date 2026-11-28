@@ -3,9 +3,9 @@ import { createHash, generateKeyPairSync, sign } from 'node:crypto'
 import { test } from 'node:test'
 import express from 'express'
 import * as oidc from 'openid-client'
-import { authConfig, createAuth } from '../auth.js'
+import { authConfig, createAuth, mayAdmin } from '../auth.js'
 import { createAdminRouter } from '../admin.js'
-import { createRefereeRouter, mayReferee } from '../referee.js'
+import { createRefereeRouter } from '../referee.js'
 import { listen, startApi } from './http.js'
 
 const config = {
@@ -128,12 +128,10 @@ async function fixture(t) {
   app.use('/api/auth', auth.router)
   const db = { prepare: () => ({ all: () => [] }) }
   app.use('/api/admin', createAdminRouter({ db, auth }))
-  const referees = new Set(['alice'])
   app.use(
     '/api/referee',
     createRefereeRouter({
       auth,
-      roster: referees,
       db: { prepare: () => ({ all: () => [], get: () => undefined, run: () => ({ changes: 0 }) }) },
     }),
   )
@@ -141,7 +139,7 @@ async function fixture(t) {
     res.json({
       user: req.user,
       authAvailable: auth.available,
-      referee: mayReferee(auth, req.user, referees),
+      admin: mayAdmin(auth, req.user),
     }),
   )
   app.get('/private', auth.requireUser, (req, res) => res.json({ owner: req.user.id }))
@@ -216,15 +214,18 @@ test('管理台只接受本客户端的 admin 角色，身份和其他角色不�
   }
 })
 
-test('裁判端按登录用户的 sub 授权', async (t) => {
+test('裁判台与管理台共用 admin 角色授权', async (t) => {
   const f = await fixture(t)
   const url = `${f.base}/api/referee/operations`
   assert.equal((await fetch(url)).status, 401)
-  for (const [subject, expected] of [
-    ['alice', 200],
-    ['bob', 403],
+  for (const [claims, expected] of [
+    [adminClaims, 200],
+    [{}, 403],
+    [{ resource_access: { 'other-client': { roles: ['admin'] } } }, 403],
   ]) {
-    const response = await f.callback(await f.begin({ subject, claims: { name: subject } }))
+    const response = await f.callback(
+      await f.begin({ subject: 'alice', claims: { name: 'alice', ...claims } }),
+    )
     const session = cookie(response, 'pioneer_session')
     const listed = await fetch(url, { headers: { cookie: session } })
     assert.equal(listed.status, expected)
@@ -232,7 +233,7 @@ test('裁判端按登录用户的 sub 授权', async (t) => {
     const meta = await (
       await fetch(`${f.base}/api/session`, { headers: { cookie: session } })
     ).json()
-    assert.equal(meta.referee, subject === 'alice')
+    assert.equal(meta.admin, expected === 200)
   }
 })
 
@@ -413,7 +414,7 @@ test('实际 API 启用 OIDC 后，未登录无法创建、读取作战记录或
   assert.deepEqual(await (await fetch(`${base}/api/session`)).json(), {
     user: null,
     authAvailable: true,
-    referee: false,
+    admin: false,
   })
   for (const [path, method] of [
     ['/api/records/best', 'GET'],

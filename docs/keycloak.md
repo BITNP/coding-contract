@@ -1,6 +1,6 @@
 # Keycloak 管理权限
 
-OJ 使用 `master` realm 的 `coding-contract` confidential client。应用只从经过签名、issuer、audience 和有效期校验的 ID Token 中读取 `resource_access.coding-contract.roles`，包含 `admin` 才能访问管理 API。`sub` 用于关联作战记录，不参与管理员授权。
+OJ 使用 `master` realm 的 `coding-contract` confidential client。应用只从经过签名、issuer、audience 和有效期校验的 ID Token 中读取 `resource_access.coding-contract.roles`，包含 `admin` 才能访问管理和裁判 API。`sub` 用于关联作战记录，不参与管理员授权。
 
 ## 首次配置
 
@@ -20,4 +20,4 @@ OJ 使用 `master` realm 的 `coding-contract` confidential client。应用只�
 
 活跃会话最多每 5 分钟通过 refresh token 获取新的 ID Token，重新计算权限；角色变化在下一次刷新后生效。并发请求共用一次刷新。刷新失败、缺少新的 ID Token、身份变化或签名无效会撤销本应用会话。会话最长 24 小时，refresh token 仅保存在服务器内存中；Keycloak 自身的 SSO / refresh token 有效期也可能要求更早重新登录。
 
-已有部署应删除环境文件中旧的 `ADMIN_USERS` 配置；新代码不读取此项。认证参数和已有客户端密钥保持不变。
+已有部署应删除环境文件中旧的 `ADMIN_USERS` 和 `REFEREE_USERS`，以及 `/etc/pioneer/roles.env` 和 systemd 的 `roles.conf` 覆盖文件；升级脚本会自动删除后两者，新代码不再读取这些配置。认证参数和已有客户端密钥保持不变。

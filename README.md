@@ -35,10 +35,9 @@ OIDC_REDIRECT_URL=https://oj.bitnp.net/api/auth/callback
 APP_PUBLIC_URL=https://oj.bitnp.net
 CORS_ORIGINS=https://oj.bitnp.net
 COOKIE_SAME_SITE=lax
-REFEREE_USERS=
 ```
 
-客户端启用 Standard Flow、关闭 Direct Access Grants，并要求 PKCE S256。密钥只保存在服务器环境文件中，已有客户端时先核对配置，避免覆盖。管理权限由 Keycloak 的 `coding-contract` client role `admin` 控制：`permission-techsvc-admin` 和 `permission-techdept-admin` 两个 realm role 的组合角色均包含它。配置角色、Scope 和 ID Token 映射的步骤见 [Keycloak 管理权限](docs/keycloak.md)。裁判名单填写 OIDC 的稳定 `sub`，多个 ID 以逗号分隔，可从已登录用户的 `/api/session` 响应读取 `user.id`；裁判端地址为 `/referee`，名单外账号无法进入。
+客户端启用 Standard Flow、关闭 Direct Access Grants，并要求 PKCE S256。密钥只保存在服务器环境文件中，已有客户端时先核对配置，避免覆盖。管理权限由 Keycloak 的 `coding-contract` client role `admin` 控制：`permission-techsvc-admin` 和 `permission-techdept-admin` 两个 realm role 的组合角色均包含它。配置角色、Scope 和 ID Token 映射的步骤见 [Keycloak 管理权限](docs/keycloak.md)。管理台 `/admin` 和裁判台 `/referee` 都由该角色授权，应用内不再维护名单。
 
 前端 `/api/` 必须反代到 API（包括 `/api/auth/login` 和 `/api/auth/callback`），回调地址须精确匹配。认证地址和站点地址使用 HTTPS；生产 Cookie 固定启用 Secure，不依赖代理头推断。
 
@@ -52,7 +51,7 @@ REFEREE_USERS=
 - 裁判端支持多名裁判：每个人都能看到全局需要核验的作战，但默认只筛选出自己接入的选手，可切到「全部裁判」查看其他人监督的作战（只能查看，核验仍由接入的裁判完成）。
 - 未配对直接开始：通过后只结算可自动核验部分的得分（排行榜按此有效成绩排名），结算页同时显示「有效成绩」与「所选成绩」并提示差额来自未核验条款；依赖未核验条款的得分同样不计入。
 - 配对后开始：通过时先记 0 分并进入待核验状态，裁判确认后按所选成绩计入，驳回则记 0 分；作战结束后不能再补配对，避免事后补核验。
-- 不含线下核验条款的作战完全由后端判定，不经过裁判。裁判端权限由 `REFEREE_USERS` 控制，访客模式下直接开放。
+- 不含线下核验条款的作战完全由后端判定，不经过裁判。裁判台与管理台共用 Keycloak 客户端的 `admin` 角色，访客模式下直接开放。
 
 ## 前端
 

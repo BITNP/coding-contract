@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { NConfigProvider, NMessageProvider, darkTheme } from 'naive-ui'
 import { CircleHelp, UserRound, ArrowUpRight, LogOut, Gavel } from 'lucide-vue-next'
 import { themeOverrides } from './theme'
-import { refreshSession, user, authAvailable, isReferee, connection } from './state'
+import { refreshSession, user, authAvailable, isAdmin, connection } from './state'
 import { api } from './api'
 import UiButton from './components/UiButton.vue'
 import SweepOverlay from './components/SweepOverlay.vue'
@@ -76,7 +76,7 @@ async function signOut() {
           <div class="header-actions">
             <span v-if="connection === 'offline'" class="connection"><i />连接中断</span>
             <div id="header-tools" class="header-tools" />
-            <UiButton v-if="isReferee" kind="ghost" @click="router.push('/referee')"
+            <UiButton v-if="isAdmin" kind="ghost" @click="router.push('/referee')"
               ><Gavel :size="21" /><span>裁判台</span></UiButton
             >
             <UiButton kind="ghost" icon-only aria-label="作战指引" @click="helpOpen = true"

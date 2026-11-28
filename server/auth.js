@@ -8,6 +8,11 @@ const roleRefreshAge = 5 * 60 * 1000
 const sessionCookie = 'pioneer_session'
 const loginCookie = 'pioneer_oidc'
 
+// 管理台和裁判台共用同一套授权：ID Token 中本客户端的 admin 角色；未配置 OIDC 的访客模式直接开放。
+export function mayAdmin(auth, user) {
+  return !auth.available || user?.isAdmin === true
+}
+
 export function authConfig(env = process.env) {
   const values = [env.OIDC_ISSUER, env.OIDC_CLIENT_ID, env.OIDC_CLIENT_SECRET, env.OIDC_REDIRECT_URL]
   if (!values.some(Boolean) && env.ALLOW_GUEST === '1' && env.NODE_ENV !== 'production') return null

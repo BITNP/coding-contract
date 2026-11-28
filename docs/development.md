@@ -44,13 +44,13 @@ ALLOW_GUEST=1 pnpm --dir server --ignore-workspace dev
 - 未配对：通过后按 `automaticPoints(contracts)` 结算有效成绩，`selectedScore` 保留所选总分，结算页同时展示两者。
 - 已配对：通过时 `review.status` 为 `pending`，`score` 保持 0 且不上榜；裁判在裁判端确认后按所选总分写入，驳回则保持 0 分。
 - 作战结束后禁止补配对（`POST /api/referee/operations/:id/pair` 返回 409），核验在 `review` 中记录裁判与时间。
-- 裁判名单由 `REFEREE_USERS` 控制，按 OIDC `sub` 匹配；访客模式（`auth.available === false`）直接开放，与管理台一致。名单可包含多名裁判：服务端对每个请求返回 `mine`（`operation.referee.id === 当前 sub`），列表接口始终返回全局在监作战，前端默认只看 `mine`，可切换为全部；核验接口仍只接受接入该选手的裁判。
+- 裁判台与管理台共用 Keycloak 客户端的 `admin` 角色授权；访客模式（`auth.available === false`）直接开放。名单可包含多名裁判：服务端对每个请求返回 `mine`（`operation.referee.id === 当前 sub`），列表接口始终返回全局在监作战，前端默认只看 `mine`，可切换为全部；核验接口仍只接受接入该选手的裁判。
 
 ## 监考与管理
 
 作战期间要求全屏，并拦截 F5、F11、F12 及刷新、关闭或新建标签等快捷键，防止误触。[integrity.js](../src/integrity.js) 记录全屏切换、切屏、失焦、粘贴和开发者工具快捷键，每 5 秒检查一次，有新事件或代码变化时连同代码快照上报，否则每 30 秒发送心跳。这些记录只作辅助判断，无法在浏览器端真正阻止作弊。
 
-管理台 `/admin` 显示最近 24 小时的作战、所选题目、异常事件和实时代码。统一登录时只接受已验证 ID Token 的 `resource_access[OIDC_CLIENT_ID].roles` 中的 `admin` 角色，最多每 5 分钟随令牌刷新更新权限，刷新失败撤销会话；详见 [Keycloak 管理权限](keycloak.md)。本地访客模式直接开放管理台。裁判台 `/referee` 显示需要线下核验的作战：待配对、监督中、待确认与已结束四栏，可按异常行为和提交代码核对后确认或驳回成绩。排行榜 `/leaderboard` 公开显示前 50 名的通过题目、有效得分与用时。
+管理台 `/admin` 显示最近 24 小时的作战、所选题目、异常事件和实时代码。统一登录时只接受已验证 ID Token 的 `resource_access[OIDC_CLIENT_ID].roles` 中的 `admin` 角色，最多每 5 分钟随令牌刷新更新权限，刷新失败撤销会话；详见 [Keycloak 管理权限](keycloak.md)。本地访客模式直接开放管理台。裁判台 `/referee` 与管理台共用同一角色授权，显示需要线下核验的作战：待配对、监督中、待确认与已结束四栏，可按异常行为和提交代码核对后确认或驳回成绩。排行榜 `/leaderboard` 公开显示前 50 名的通过题目、有效得分与用时。
 ## 评测机制
 
 编辑时在浏览器本地检查源码；样例和提交由后端重新分析、编译并在 go-judge 沙箱运行，按服务端保存的指标计分。编译不计入运行时限和内存限制。
