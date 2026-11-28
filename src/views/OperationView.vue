@@ -20,6 +20,8 @@ import {
   LogOut,
   Ellipsis,
   SlidersHorizontal,
+  Gavel,
+  CircleHelp,
 } from 'lucide-vue-next'
 import { api } from '../api.js'
 import {
@@ -79,6 +81,28 @@ const submission = computed(() => {
 })
 const ids = computed(() => finalSubmission.value?.contracts ?? operation.value?.contracts ?? [])
 const points = computed(() => pointsOf(ids.value))
+const needsReferee = computed(() => Boolean(operation.value?.needsReferee))
+const referee = computed(() => operation.value?.referee || null)
+const review = computed(() => operation.value?.review || null)
+const pairCode = computed(() => operation.value?.pairCode || '')
+const selectedScore = computed(() => operation.value?.selectedScore || 0)
+const automaticScore = computed(() => operation.value?.automaticScore ?? 0)
+const effectiveScore = computed(() => {
+  if (!operation.value) return 0
+  return review.value?.status === 'pending' ? null : operation.value.score
+})
+const partialScore = computed(() =>
+  operation.value?.finishedAt ? operation.value.score ?? 0 : automaticScore.value,
+)
+const refereeNote = computed(() => {
+  if (review.value?.status === 'pending')
+    return `已由裁判 ${referee.value?.name ?? ''} 接入，等待现场核验。裁判确认后按所选成绩计入。`
+  if (review.value?.status === 'confirmed') return `裁判 ${review.value.by?.name ?? ''} 已确认成绩。`
+  if (review.value?.status === 'rejected')
+    return `裁判 ${review.value.by?.name ?? ''} 已驳回成绩：核验未通过，有效成绩记 0 分。`
+  return '部分词条没有经过裁判核验，有效得分偏少；依赖这些词条的条款同样不计分。'
+})
+const pairingOpen = ref(false)
 const masked = computed(() => senseLevel(ids.value))
 const pad = (value) => String(value).padStart(2, '0')
 
@@ -191,6 +215,53 @@ watch(finished, async (value) => {
   settlementOpen.value = true
 })
 
+// 配对与核验状态由裁判端异步推进，正在作战的页面定期拉取轻量状态。
+let pairingTimer = 0
+let lastPairing = ''
+async function pollPairing() {
+  clearTimeout(pairingTimer)
+  try {
+    const view = await api.pairing(operationId)
+    if (!operation.value) return
+    Object.assign(operation.value, {
+      referee: view.referee,
+      review: view.review,
+      score: view.score,
+      selectedScore: view.selectedScore,
+      automaticScore: view.automaticScore,
+      needsReferee: view.needsReferee,
+      pairCode: view.pairCode,
+      phase: view.phase,
+      finishedAt: view.finishedAt,
+    })
+    const status = view.review?.status || (view.referee ? `paired:${view.referee.id}` : '')
+    if (status !== lastPairing) {
+      lastPairing = status
+      if (view.review?.status === 'confirmed' || view.review?.status === 'rejected') {
+        settlementOpen.value = true
+        try {
+          best.value = (await api.record()).score
+        } catch {}
+        message.success(
+          view.review.status === 'confirmed' ? '裁判已确认成绩' : '裁判已驳回本次成绩',
+        )
+      } else if (view.review?.status === 'pending') {
+        settlementOpen.value = true
+      } else if (view.referee) {
+        message.success(`裁判 ${view.referee.name} 已接入`)
+      }
+    }
+  } catch {}
+  schedulePairing()
+}
+function schedulePairing() {
+  clearTimeout(pairingTimer)
+  if (!needsReferee.value) return
+  if (finished.value && (!review.value || review.value.status !== 'pending')) return
+  pairingTimer = setTimeout(pollPairing, 5000)
+}
+watch(needsReferee, (value) => value && schedulePairing())
+
 const live = computed(() => Boolean(operation.value) && !ended.value)
 const integrity = useIntegrity(operationId, {
   active: () => live.value,
@@ -227,7 +298,13 @@ async function load() {
   try {
     const first = !operation.value
     apply(await api.operation(operationId))
-    if (first) integrity.record('open')
+    if (first) {
+      integrity.record('open')
+      if (needsReferee.value) {
+        if (!referee.value && route.query.pair === '1') pairingOpen.value = true
+        schedulePairing()
+      }
+    }
   } catch (e) {
     error.value = e.message
   } finally {
@@ -319,6 +396,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   clearInterval(clock)
   clock = 0
+  clearTimeout(pairingTimer)
   sampleRequest?.abort()
   clearTimeout(refreshTimer)
   removeEventListener('pagehide', saveDraft)
@@ -327,7 +405,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="operation-view">
+  <main class="operation-view" :class="{ 'with-referee': needsReferee && !loading && !error }">
     <div v-if="loading" class="terminal-state">
       <NSpin size="large" />
       <p>正在接收作战任务…</p>
@@ -338,6 +416,32 @@ onBeforeUnmount(() => {
     </div>
 
     <template v-else>
+      <section
+        v-if="needsReferee && !adjusting"
+        class="referee-bar"
+        :class="{
+          paired: Boolean(referee),
+          pending: review?.status === 'pending',
+          rejected: review?.status === 'rejected',
+        }"
+      >
+        <Gavel :size="19" />
+        <div class="referee-copy">
+          <b v-if="!referee && !finished">含线下核验条款 · 等待裁判接入</b>
+          <b v-else-if="!referee">含线下核验条款 · 未配对</b>
+          <b v-else-if="review?.status === 'pending'">裁判 {{ referee.name }} 已接入 · 等待核验</b>
+          <b v-else-if="review?.status === 'confirmed'">裁判 {{ referee.name }} 已确认成绩</b>
+          <b v-else-if="review?.status === 'rejected'">裁判 {{ referee.name }} 已驳回成绩</b>
+          <b v-else>裁判 {{ referee.name }} 正在监督</b>
+          <span v-if="!referee && !finished"
+            >配对码 <em>{{ pairCode }}</em> · 请出示给现场裁判；未配对时有效成绩为
+            {{ automaticScore }} / {{ selectedScore }} 分</span
+          >
+          <span v-else-if="!referee">未配对：有效成绩 {{ operation.score }} / {{ selectedScore }} 分</span>
+          <span v-else-if="!finished">挑战结束仍需裁判确认成绩</span>
+        </div>
+        <UiButton kind="dark" @click="pairingOpen = true"><CircleHelp :size="16" />核验说明</UiButton>
+      </section>
       <div v-show="!adjusting" class="terminal-layout" :class="{ 'has-effects': checks.length }">
         <article class="panel brief-panel">
           <header class="panel-heading">
@@ -559,7 +663,23 @@ onBeforeUnmount(() => {
     </GameDialog>
 
     <GameDialog v-if="operation" v-model:show="settlementOpen" title="作战结算" :width="560">
-      <div class="intel-stats">
+      <template v-if="operation.phase === 'passed' && needsReferee">
+        <div class="intel-stats">
+          <div>
+            <strong v-if="effectiveScore !== null">{{ effectiveScore }}</strong>
+            <strong v-else class="pending-score">待确认</strong>
+            <span>有效成绩</span>
+          </div>
+          <div><strong>{{ selectedScore }}</strong><span>所选成绩</span></div>
+        </div>
+        <p
+          class="referee-note"
+          :class="{ warn: !referee, rejected: review?.status === 'rejected' }"
+        >
+          <Gavel :size="15" />{{ refereeNote }}
+        </p>
+      </template>
+      <div v-else class="intel-stats">
         <div><strong>{{ operation.score }}</strong><span>作战得分</span></div>
         <div><strong>{{ best }}</strong><span>最高纪录</span></div>
       </div>
@@ -569,6 +689,32 @@ onBeforeUnmount(() => {
       <template #actions>
         <UiButton kind="dark" @click="settlementOpen = false">查看代码</UiButton>
         <UiButton kind="primary" @click="router.push('/')">返回指标选择</UiButton>
+      </template>
+    </GameDialog>
+
+    <GameDialog v-if="operation" v-model:show="pairingOpen" title="线下核验与配对" :width="520">
+      <div class="pairing-body">
+        <template v-if="!referee">
+          <p>本场含需现场核验的条款。请把下面的配对码出示给现场裁判，由裁判在裁判端接入你的作战。</p>
+          <div v-if="pairCode" class="pair-code"><span>配对码</span><strong>{{ pairCode }}</strong></div>
+          <p>一名裁判可以同时监督多名参赛者。配对后，挑战结束仍需裁判确认成绩，确认后按所选成绩计入。</p>
+          <p class="pair-warning" v-if="!finished">
+            当前未配对：即使通过，有效成绩也只有 {{ partialScore }} / {{ selectedScore }} 分，未核验条款及其依赖条款不计分。
+          </p>
+          <p class="pair-warning" v-else>
+            作战已结束且未配对：有效成绩 {{ operation.score }} / {{ selectedScore }} 分，未核验条款及其依赖条款不计分。
+          </p>
+        </template>
+        <template v-else>
+          <p>裁判 <b>{{ referee.name }}</b> 已接入这次作战。</p>
+          <p v-if="review?.status === 'pending'">挑战已通过，等待裁判确认成绩。</p>
+          <p v-else-if="review?.status === 'confirmed'">裁判已确认成绩，有效成绩 {{ operation.score }} 分。</p>
+          <p v-else-if="review?.status === 'rejected'">裁判已驳回成绩，有效成绩 0 分。</p>
+          <p v-else>挑战结束后，裁判会在裁判端确认或驳回成绩。</p>
+        </template>
+      </div>
+      <template #actions>
+        <UiButton kind="primary" @click="pairingOpen = false">我知道了</UiButton>
       </template>
     </GameDialog>
   </main>
@@ -585,6 +731,119 @@ onBeforeUnmount(() => {
   gap: var(--space-3);
   height: calc(100dvh - var(--header-height) - var(--page-bottom) - var(--space-4) - 8px);
   min-height: 460px;
+}
+.with-referee .terminal-layout {
+  height: calc(100dvh - var(--header-height) - var(--page-bottom) - var(--space-4) - 62px);
+}
+.referee-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 46px;
+  margin-top: var(--space-3);
+  padding: 6px 14px;
+  border-left: 3px solid #e8a33d;
+  background: linear-gradient(90deg, #e8a33d14, #242528 65%);
+  font-size: 13px;
+  color: #c7c8cc;
+}
+.referee-bar > svg {
+  flex: none;
+  color: #e8a33d;
+}
+.referee-bar.paired {
+  border-left-color: #7f9c5e;
+  background: linear-gradient(90deg, #7f9c5e14, #242528 65%);
+}
+.referee-bar.paired > svg {
+  color: #a6c47c;
+}
+.referee-bar.pending {
+  border-left-color: #c9a227;
+}
+.referee-bar.rejected {
+  border-left-color: var(--red);
+}
+.referee-bar.rejected > svg {
+  color: #ff718a;
+}
+.referee-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+}
+.referee-copy b {
+  font-weight: 500;
+  color: var(--text);
+}
+.referee-copy em {
+  font: 600 15px/1 var(--mono);
+  font-style: normal;
+  letter-spacing: 0.16em;
+  color: #f3c264;
+}
+.referee-bar .ui-button {
+  flex: none;
+  height: 32px;
+}
+.referee-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #c7c8cc;
+}
+.referee-note > svg {
+  flex: none;
+  margin-top: 3px;
+  color: #e8a33d;
+}
+.referee-note.warn {
+  color: #ffb4b4;
+}
+.referee-note.warn > svg {
+  color: #ff718a;
+}
+.referee-note.rejected {
+  color: #ff718a;
+}
+.intel-stats .pending-score {
+  font-size: 28px;
+  color: #e8a33d;
+}
+.pairing-body p {
+  margin-bottom: 12px;
+  line-height: 1.8;
+  color: #c7c8cc;
+}
+.pairing-body b {
+  font-weight: 500;
+  color: var(--text);
+}
+.pair-code {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 4px 0 14px;
+  padding: 12px 20px;
+  background: #1b1c20;
+}
+.pair-code span {
+  font-size: 13px;
+  color: var(--muted);
+}
+.pair-code strong {
+  font: 400 32px/1 var(--mono);
+  letter-spacing: 0.22em;
+  color: #f3c264;
+}
+.pair-warning {
+  color: #ffb4b4 !important;
 }
 .terminal-layout.has-effects {
   grid-template-columns: minmax(300px, 0.8fr) minmax(0, 1.6fr) clamp(220px, 15vw, 270px);
@@ -1005,6 +1264,7 @@ onBeforeUnmount(() => {
 }
 @media (max-width: 960px) {
   .terminal-layout,
+  .with-referee .terminal-layout,
   .terminal-layout.has-effects {
     grid-template-columns: 1fr;
     height: auto;

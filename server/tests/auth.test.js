@@ -5,6 +5,7 @@ import express from 'express'
 import * as oidc from 'openid-client'
 import { authConfig, createAuth } from '../auth.js'
 import { createAdminRouter } from '../admin.js'
+import { createRefereeRouter, mayReferee } from '../referee.js'
 import { listen, startApi } from './http.js'
 
 const config = {
@@ -105,7 +106,22 @@ async function fixture(t) {
   app.use('/api/auth', auth.router)
   const db = { prepare: () => ({ all: () => [] }) }
   app.use('/api/admin', createAdminRouter({ db, auth, admins: 'alice' }))
-  app.get('/api/session', (req, res) => res.json({ user: req.user, authAvailable: auth.available }))
+  const referees = new Set(['alice'])
+  app.use(
+    '/api/referee',
+    createRefereeRouter({
+      auth,
+      roster: referees,
+      db: { prepare: () => ({ all: () => [], get: () => undefined, run: () => ({ changes: 0 }) }) },
+    }),
+  )
+  app.get('/api/session', (req, res) =>
+    res.json({
+      user: req.user,
+      authAvailable: auth.available,
+      referee: mayReferee(auth, req.user, referees),
+    }),
+  )
   app.get('/private', auth.requireUser, (req, res) => res.json({ owner: req.user.id }))
   const base = await listen(t, app)
   async function begin({ returnTo = '/', subject = 'alice', claims = {}, key } = {}) {
@@ -167,6 +183,26 @@ test('管理台按登录用户的 sub 授权', async (t) => {
     const response = await f.callback(await f.begin({ subject, claims: { name: 'alice' } }))
     const session = cookie(response, 'pioneer_session')
     assert.equal((await fetch(url, { headers: { cookie: session } })).status, expected)
+  }
+})
+
+test('裁判端按登录用户的 sub 授权', async (t) => {
+  const f = await fixture(t)
+  const url = `${f.base}/api/referee/operations`
+  assert.equal((await fetch(url)).status, 401)
+  for (const [subject, expected] of [
+    ['alice', 200],
+    ['bob', 403],
+  ]) {
+    const response = await f.callback(await f.begin({ subject, claims: { name: subject } }))
+    const session = cookie(response, 'pioneer_session')
+    const listed = await fetch(url, { headers: { cookie: session } })
+    assert.equal(listed.status, expected)
+    if (expected === 200) assert.deepEqual((await listed.json()).operations, [])
+    const meta = await (
+      await fetch(`${f.base}/api/session`, { headers: { cookie: session } })
+    ).json()
+    assert.equal(meta.referee, subject === 'alice')
   }
 })
 
@@ -259,7 +295,11 @@ test('登录返回地址不能跳到外部站点', async (t) => {
 
 test('实际 API 启用 OIDC 后，未登录无法创建、读取作战记录或评测代码', async (t) => {
   const { base } = await startApi(t, oidcEnv)
-  assert.deepEqual(await (await fetch(`${base}/api/session`)).json(), { user: null, authAvailable: true })
+  assert.deepEqual(await (await fetch(`${base}/api/session`)).json(), {
+    user: null,
+    authAvailable: true,
+    referee: false,
+  })
   for (const [path, method] of [
     ['/api/records/best', 'GET'],
     ['/api/operations', 'POST'],
