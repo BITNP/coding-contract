@@ -79,6 +79,7 @@ async function fixture(t) {
 test('作战复用活动局，三道题均可查看，放弃后直接结束', async (t) => {
   const { base, request } = await fixture(t)
   assert.equal((await fetch(`${base}/app.js`)).status, 404)
+  assert.deepEqual((await request('/display')).records, [])
   assert.equal((await fetch(`${base}/api/operations`, { method: 'POST' })).status, 400)
   await request('/operations', {}, 400)
   await request('/operations', { indicators: [] }, 400)

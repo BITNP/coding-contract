@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { authConfig, createAuth, mayAdmin } from './auth.js'
 import { createAdminRouter } from './admin.js'
+import { displayBoard } from './display.js'
 import { leaderboard } from './leaderboard.js'
 import { publicQuestions, questions } from './questions/index.js'
 import { evaluate } from './judge.js'
@@ -110,6 +111,7 @@ app.use('/api', (_req, _res, next) => {
   next()
 })
 app.use('/api/leaderboard', leaderboard(db))
+app.use('/api/display', displayBoard(db))
 app.use('/api/admin', createAdminRouter({ db, auth }))
 app.use('/api/referee', createRefereeRouter({ db, auth }))
 

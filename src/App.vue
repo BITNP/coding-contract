@@ -2,7 +2,7 @@
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NConfigProvider, NMessageProvider, darkTheme } from 'naive-ui'
-import { CircleHelp, UserRound, ArrowUpRight, LogOut, Gavel } from 'lucide-vue-next'
+import { CircleHelp, UserRound, ArrowUpRight, LogOut, Gavel, Trophy } from 'lucide-vue-next'
 import { themeOverrides } from './theme'
 import { refreshSession, user, authAvailable, isAdmin, connection } from './state'
 import { api } from './api'
@@ -76,6 +76,9 @@ async function signOut() {
           <div class="header-actions">
             <span v-if="connection === 'offline'" class="connection"><i />连接中断</span>
             <div id="header-tools" class="header-tools" />
+            <UiButton v-if="!inOperation" kind="ghost" @click="router.push('/leaderboard')"
+              ><Trophy :size="21" /><span>排行榜</span></UiButton
+            >
             <UiButton v-if="isAdmin" kind="ghost" @click="router.push('/referee')"
               ><Gavel :size="21" /><span>裁判台</span></UiButton
             >
