@@ -4,7 +4,7 @@
 
 ## 认证与后端
 
-先运行 `sudo install -d -m 755 /etc/pioneer`。在 Keycloak 注册独立客户端，可参考 [客户端模板](../deploy/keycloak-client.json)。按 [统一认证说明](../README.md#网协统一认证) 配置 `/etc/pioneer/api.env`，权限为 `600`，并在 `REFEREE_USERS` 中填写裁判的 OIDC `sub`（多个用逗号分隔）。服务默认监听 `127.0.0.1:3001`，数据目录为 `/var/lib/pioneer`。安装脚本在启动服务前检查 OIDC 配置，生产服务禁用访客模式。
+先运行 `sudo install -d -m 755 /etc/pioneer`。在 Keycloak 注册独立客户端，可参考 [客户端模板](../deploy/keycloak-client.json)。按 [统一认证说明](../README.md#网协统一认证) 配置 `/etc/pioneer/api.env`，权限为 `600`。管理台和裁判台的权限见 [Keycloak 管理权限](keycloak.md)。服务默认监听 `127.0.0.1:3001`，数据目录为 `/var/lib/pioneer`。安装脚本在启动服务前检查 OIDC 配置，生产服务禁用访客模式。
 
 上传 `server/` 和 `shared/` 到同一目录，执行：
 
@@ -48,11 +48,13 @@ sudo systemctl reload nginx
 
 ## 验证与更新
 
-确认 `nginx`、`pioneer-api`、`go-judge` 都处于 active 状态。浏览器完成统一登录后，`/api/session` 应返回当前用户；未登录的作战和记录 API 应返回 401。退出只清除本应用会话。裁判台 `/referee` 对 `REFEREE_USERS` 中的账号开放，名单外账号应返回 403。
+确认 `nginx`、`pioneer-api`、`go-judge` 都处于 active 状态。浏览器完成统一登录后，`/api/session` 应返回当前用户；未登录的作战和记录 API 应返回 401。退出只清除本应用会话。管理台 `/admin` 和裁判台 `/referee` 只对持有本客户端 `admin` 角色的账号开放，其他账号应返回 403。
 
 `server/install.sh` 会运行全部语言的样例自检。真实沙箱和部署端点的验证命令见[开发说明](development.md#验证)。
 
 更新后端时重跑安装脚本，保留 `/etc/pioneer/api.env` 和 `/var/lib/pioneer/`。更新前端时重新构建并替换静态产物。浏览器分别缓存 C/C++、Python 和 JS/TS 的语言服务资源。
+
+工具链和依赖缓存已经安装完整时，可执行 `sudo sh server/install.sh --app-only`：跳过 APT 和语言工具链下载，只从本机 pnpm 缓存离线安装 API 依赖，仍验证认证配置并运行全部语言的样例自检。离线依赖不齐时会停止，不会切换代理或在线下载。
 
 ## 可回滚发布
 
@@ -89,25 +91,25 @@ sudo sh deploy/server/verify.sh
 
 ## 管理台与裁判权限
 
-角色配置单独保存在 `/etc/pioneer/roles.env`，不会和 OIDC 客户端密钥放在同一个文件。首次升级时，脚本会把 `api.env` 中已有的 `ADMIN_USERS`、`REFEREE_USERS` 复制过去；已有角色文件不会被覆盖。
+管理台 `/admin` 和裁判台 `/referee` 都由 Keycloak `coding-contract` 客户端的 `admin` 角色授权，应用内不再维护名单。角色、Scope 和 ID Token 映射的配置步骤见 [Keycloak 管理权限](keycloak.md)。
 
-编辑配置：
+活跃会话最多每 5 分钟通过 refresh token 换发 ID Token 并重新计算权限，角色变更在下一次刷新后生效，不需要重启 `pioneer-api`，也不会让所有人重新登录。旧版本遗留的 `/etc/pioneer/roles.env` 和 `/etc/systemd/system/pioneer-api.service.d/roles.conf` 会在升级时自动删除，删除前的副本保存在本次备份目录的 `config/` 中。
 
-```sh
-sudoedit /etc/pioneer/roles.env
-```
+## bitnp-oj 本次更新
 
-填写 Keycloak OIDC 的稳定 `sub`，多个账号用逗号分隔：
-
-```dotenv
-ADMIN_USERS=管理员的sub
-REFEREE_USERS=裁判一的sub,裁判二的sub
-```
-
-账号登录后可访问 `/api/session`，响应中的 `user.id` 就是对应 `sub`。修改角色后重启后端使配置生效：
+本次从旧作战模型切换到三题任选，数据库改为 `contest.sqlite`。以下命令会按本次授权删除旧的内部测试数据；日常更新不要执行删除数据库的步骤。源码和构建产物已放在 OJ 的 `/home/bitnp/coding-contract`，在该机器终端执行：
 
 ```sh
-sudo systemctl restart pioneer-api
+cd /home/bitnp/coding-contract
+sudo apt-get -o Acquire::http::Proxy=DIRECT -o Acquire::https::Proxy=DIRECT install -y libnginx-mod-http-brotli-static
+sudo systemctl stop pioneer-api
+sudo rm -f /var/lib/pioneer/pioneer.db /var/lib/pioneer/pioneer.db-wal /var/lib/pioneer/pioneer.db-shm /var/lib/pioneer/contest.sqlite /var/lib/pioneer/contest.sqlite-wal /var/lib/pioneer/contest.sqlite-shm
+sudo sh server/install.sh --app-only
+sudo rsync -a --delete dist/ /var/www/coding-contract/
+sudo install -m 644 deploy/oj.nginx.conf /etc/nginx/sites-available/coding-contract
+sudo /usr/sbin/nginx -t
+sudo systemctl reload nginx
+sudo systemctl is-active pioneer-api go-judge nginx
 ```
 
-重启会使所有用户重新登录。只修改角色时不需要重载 Nginx、修改 Traefik，也不需要重启 `go-judge`。
+每条命令成功后再执行下一条；出现错误先停止并保留输出。不要用 `sudo -E` 或给整个安装脚本设置代理。APT 的 DIRECT 参数让软件源直连，应用更新使用离线缓存。`/etc/pioneer/api.env` 中旧的 `ADMIN_USERS`、`REFEREE_USERS` 可删除，其他认证配置和密钥保留。上线后重新登录，按 [管理权限验证步骤](keycloak.md#验证与权限变化) 检查普通用户和管理员。

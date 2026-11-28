@@ -18,7 +18,7 @@ export const selectedIds = ref(validStored ? stored.indicators : defaultSelectio
 export const user = ref(null)
 export const best = ref(0)
 export const authAvailable = ref(false)
-export const isReferee = ref(false)
+export const isAdmin = ref(false)
 export const connection = ref('connecting')
 
 // 卡片与提示共用同一份状态；提交作战时再由服务器校验。
@@ -62,7 +62,7 @@ export async function refreshSession() {
     const session = await api.session()
     user.value = session.user
     authAvailable.value = session.authAvailable
-    isReferee.value = Boolean(session.referee)
+    isAdmin.value = Boolean(session.admin)
     best.value = session.authAvailable && !session.user ? 0 : (await api.record()).score
     connection.value = 'online'
   } catch {

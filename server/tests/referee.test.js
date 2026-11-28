@@ -51,15 +51,13 @@ test('多个裁判共享全局列表，但只能核验自己接入的选手', as
 
   const app = express()
   app.use(express.json())
+  const admins = new Set(['ref-a', 'ref-b'])
   app.use((req, _res, next) => {
     const id = req.get('x-user')
-    req.user = id ? { id, name: id, avatar: null } : null
+    req.user = id ? { id, name: id, avatar: null, isAdmin: admins.has(id) } : null
     next()
   })
-  app.use(
-    '/api/referee',
-    createRefereeRouter({ db, auth: { available: true }, roster: new Set(['ref-a', 'ref-b']) }),
-  )
+  app.use('/api/referee', createRefereeRouter({ db, auth: { available: true } }))
   app.use((error, _req, res, _next) => {
     res.status(error.status || 500).json({ message: error.message })
   })

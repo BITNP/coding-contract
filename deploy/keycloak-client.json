@@ -9,10 +9,27 @@
   "implicitFlowEnabled": false,
   "directAccessGrantsEnabled": false,
   "serviceAccountsEnabled": false,
+  "fullScopeAllowed": false,
   "rootUrl": "https://oj.bitnp.net",
   "baseUrl": "/",
   "redirectUris": ["https://oj.bitnp.net/api/auth/callback"],
   "webOrigins": ["https://oj.bitnp.net"],
   "defaultClientScopes": ["web-origins", "profile", "email"],
-  "attributes": {"pkce.code.challenge.method": "S256"}
+  "attributes": {"pkce.code.challenge.method": "S256"},
+  "protocolMappers": [{
+    "name": "coding-contract-client-roles",
+    "protocol": "openid-connect",
+    "protocolMapper": "oidc-usermodel-client-role-mapper",
+    "consentRequired": false,
+    "config": {
+      "usermodel.clientRoleMapping.clientId": "coding-contract",
+      "usermodel.clientRoleMapping.rolePrefix": "",
+      "claim.name": "resource_access.coding-contract.roles",
+      "jsonType.label": "String",
+      "multivalued": "true",
+      "id.token.claim": "true",
+      "access.token.claim": "true",
+      "userinfo.token.claim": "false"
+    }
+  }]
 }

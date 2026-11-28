@@ -193,27 +193,14 @@ if [ "$preflight_ok" -ne 1 ]; then
   exit 1
 fi
 
-if [ ! -e "$roles_env" ]; then
-  roles_tmp=$(mktemp /etc/pioneer/.roles.XXXXXX)
-  awk '
-    /^ADMIN_USERS=/ { admin = $0 }
-    /^REFEREE_USERS=/ { referee = $0 }
-    END {
-      print "# 管理台和裁判端角色按 Keycloak OIDC 的稳定 sub 配置，多个值用逗号分隔。"
-      print "# 登录后可从 /api/session 的 user.id 读取 sub。修改本文件后重启 pioneer-api。"
-      print ""
-      print (admin != "" ? admin : "ADMIN_USERS=")
-      print (referee != "" ? referee : "REFEREE_USERS=")
-    }
-  ' /etc/pioneer/api.env > "$roles_tmp"
-  chmod 600 "$roles_tmp"
-  mv "$roles_tmp" "$roles_env"
-  echo '已创建角色配置：/etc/pioneer/roles.env'
-else
-  echo '保留已有角色配置：/etc/pioneer/roles.env'
+if [ -e "$roles_env" ]; then
+  rm -f "$roles_env"
+  echo '已移除旧角色名单：/etc/pioneer/roles.env，权限改由 Keycloak 的 admin 角色授予'
 fi
-install -d -m 755 "$(dirname "$roles_dropin")"
-install -m 644 "$root/deploy/server/roles.conf" "$roles_dropin"
+if [ -e "$roles_dropin" ]; then
+  rm -f "$roles_dropin"
+  echo '已移除 systemd 覆盖：pioneer-api.service.d/roles.conf'
+fi
 
 legacy_app="$releases/previous-$RELEASE_ID"
 legacy_web="$web_releases/previous-$RELEASE_ID"
@@ -245,4 +232,4 @@ rollback_on_failure=0
 echo "部署完成：$RELEASE_ID"
 echo "本次备份：$backup"
 echo "数据保留：/var/lib/pioneer"
-echo "角色配置：/etc/pioneer/roles.env"
+echo "管理权限：Keycloak coding-contract 客户端的 admin 角色"

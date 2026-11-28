@@ -162,13 +162,12 @@ for (value in values[-1]) {
 }
 cat(format(best, scientific = FALSE), "\\n")`,
   bash: `read -r n
-length=0 best=0
-while read -r -a row; do
-  for value in "\${row[@]}"; do
-    (( length = length && value > previous ? length + 1 : 1 ))
-    (( length > best )) && best=$length
-    previous=$value
-  done
+read -r -d '' data
+length=0 best=0 previous=0
+for value in $data; do
+  (( length = value > previous ? length + 1 : 1,
+     best = length > best ? length : best,
+     previous = value ))
 done
 printf '%s\\n' "$best"`,
 }

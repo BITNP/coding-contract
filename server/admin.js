@@ -1,16 +1,11 @@
 import { Router } from 'express'
 import { questions } from './questions/index.js'
 import { awayMs, flaggedCounts } from './activity.js'
+import { mayAdmin } from './auth.js'
 
 const window24h = 24 * 60 * 60 * 1000
 
-export function createAdminRouter({ db, auth, admins = process.env.ADMIN_USERS }) {
-  const allowed = new Set(
-    (admins || '')
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean),
-  )
+export function createAdminRouter({ db, auth }) {
   const router = Router()
   const recent = db.prepare(
     `SELECT data FROM operations WHERE created_at >= ? AND (? OR finished_at IS NULL)
@@ -21,7 +16,7 @@ export function createAdminRouter({ db, auth, admins = process.env.ADMIN_USERS }
   router.use((req, res, next) => {
     if (!auth.available) return next()
     if (!req.user) return res.status(401).json({ message: '请先统一登录' })
-    if (!allowed.has(req.user.id)) return res.status(403).json({ message: '无管理权限' })
+    if (!mayAdmin(auth, req.user)) return res.status(403).json({ message: '无管理权限' })
     next()
   })
 

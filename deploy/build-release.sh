@@ -46,8 +46,6 @@ cp \
   deploy/server/update.sh \
   deploy/server/rollback.sh \
   deploy/server/verify.sh \
-  deploy/server/roles.conf \
-  deploy/server/roles.env.example \
   "$bundle/deploy/server/"
 cp docs/deployment.md "$bundle/deployment.md"
 

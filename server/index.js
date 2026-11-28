@@ -2,14 +2,14 @@ import express from 'express'
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { authConfig, createAuth } from './auth.js'
+import { authConfig, createAuth, mayAdmin } from './auth.js'
 import { createAdminRouter } from './admin.js'
 import { leaderboard } from './leaderboard.js'
 import { publicQuestions, questions } from './questions/index.js'
 import { evaluate } from './judge.js'
 import { openDatabase, transaction } from './database.js'
 import { createOperation, finishOperation, operationView } from './operations.js'
-import { createRefereeRouter, mayReferee, refereeRoster } from './referee.js'
+import { createRefereeRouter } from './referee.js'
 import { adjustContracts, selectionErrors, submitGraceMs } from '../shared/contracts.js'
 import { activityLabels } from '../shared/labels.js'
 import { languageById } from '../shared/languages.js'
@@ -60,7 +60,6 @@ const statements = {
 }
 const judging = new Map()
 const guest = { id: 'preview', name: '访客', avatar: null }
-const roster = refereeRoster()
 const user = (req) => req.user || guest
 const fail = (status, message) => Object.assign(new Error(message), { status })
 
@@ -101,7 +100,7 @@ app.get('/api/session', (req, res) =>
   res.json({
     user: req.user,
     authAvailable: auth.available,
-    referee: mayReferee(auth, req.user, roster),
+    admin: mayAdmin(auth, req.user),
   }),
 )
 app.use('/api/operations', auth.requireUser)
@@ -112,7 +111,7 @@ app.use('/api', (_req, _res, next) => {
 })
 app.use('/api/leaderboard', leaderboard(db))
 app.use('/api/admin', createAdminRouter({ db, auth }))
-app.use('/api/referee', createRefereeRouter({ db, auth, roster }))
+app.use('/api/referee', createRefereeRouter({ db, auth }))
 
 app.get('/api/records/best', (req, res) => {
   res.json(statements.best.get(user(req).id))

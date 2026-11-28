@@ -3,9 +3,9 @@ import { createHash, generateKeyPairSync, sign } from 'node:crypto'
 import { test } from 'node:test'
 import express from 'express'
 import * as oidc from 'openid-client'
-import { authConfig, createAuth } from '../auth.js'
+import { authConfig, createAuth, mayAdmin } from '../auth.js'
 import { createAdminRouter } from '../admin.js'
-import { createRefereeRouter, mayReferee } from '../referee.js'
+import { createRefereeRouter } from '../referee.js'
 import { listen, startApi } from './http.js'
 
 const config = {
@@ -37,47 +37,69 @@ const cookie = (response, name) =>
     .getSetCookie()
     .find((value) => value.startsWith(`${name}=`))
     ?.split(';')[0]
+const adminClaims = { resource_access: { 'coding-contract': { roles: ['admin'] } } }
 
 async function fixture(t) {
   const codes = new Map()
+  const refreshTokens = new Map()
   let exchanges = 0
+  let refreshes = 0
+  let refreshOptions = {}
   let clock = Date.now()
   const issuer = express()
   issuer.use(express.urlencoded({ extended: false }))
   issuer.get('/jwks', (_req, res) => res.json({ keys: [jwk] }))
-  issuer.post('/token', (req, res) => {
-    exchanges++
-    const flow = codes.get(req.body.code)
-    codes.delete(req.body.code)
+  issuer.post('/token', async (req, res) => {
+    const refreshing = req.body.grant_type === 'refresh_token'
+    let flow
+    if (refreshing) {
+      refreshes++
+      flow = refreshTokens.get(req.body.refresh_token)
+      refreshTokens.delete(req.body.refresh_token)
+      await refreshOptions.wait?.()
+      if (refreshOptions.error) return res.status(400).json({ error: 'invalid_grant' })
+    } else {
+      exchanges++
+      flow = codes.get(req.body.code)
+      codes.delete(req.body.code)
+    }
     if (
       !flow ||
       req.body.client_id !== config.clientId ||
       req.body.client_secret !== config.clientSecret ||
-      req.body.redirect_uri !== config.redirectUrl ||
-      req.body.grant_type !== 'authorization_code' ||
-      createHash('sha256')
-        .update(req.body.code_verifier || '')
-        .digest('base64url') !== flow.challenge
+      (!refreshing &&
+        (req.body.redirect_uri !== config.redirectUrl ||
+          req.body.grant_type !== 'authorization_code' ||
+          createHash('sha256')
+            .update(req.body.code_verifier || '')
+            .digest('base64url') !== flow.challenge))
     )
       return res.status(400).json({ error: 'invalid_grant' })
     const issued = Math.floor(Date.now() / 1000)
+    const refreshToken = `refresh-${Math.random()}`
+    if (!flow.noRefresh) refreshTokens.set(refreshToken, flow)
     res.json({
       token_type: 'Bearer',
       access_token: 'test-access-token',
       expires_in: 300,
-      id_token: signedToken(
-        {
-          iss: config.issuer,
-          aud: config.clientId,
-          sub: 'alice',
-          name: 'Alice',
-          iat: issued,
-          exp: issued + 300,
-          nonce: flow.nonce,
-          ...flow.claims,
-        },
-        flow.key,
-      ),
+      ...(!flow.noRefresh && { refresh_token: refreshToken }),
+      id_token:
+        refreshing && refreshOptions.omitIdToken
+          ? undefined
+          : signedToken(
+              {
+                iss: config.issuer,
+                aud: config.clientId,
+                sub: 'alice',
+                name: 'Alice',
+                iat: issued,
+                exp: Math.floor(clock / 1000) + 300,
+                nonce: flow.nonce,
+                ...flow.claims,
+                ...(refreshing && refreshOptions.claims),
+              },
+              refreshing ? refreshOptions.key || flow.key : flow.key,
+            ),
     })
   })
   const issuerBase = await listen(t, issuer)
@@ -105,13 +127,11 @@ async function fixture(t) {
   app.use(auth.authenticate)
   app.use('/api/auth', auth.router)
   const db = { prepare: () => ({ all: () => [] }) }
-  app.use('/api/admin', createAdminRouter({ db, auth, admins: 'alice' }))
-  const referees = new Set(['alice'])
+  app.use('/api/admin', createAdminRouter({ db, auth }))
   app.use(
     '/api/referee',
     createRefereeRouter({
       auth,
-      roster: referees,
       db: { prepare: () => ({ all: () => [], get: () => undefined, run: () => ({ changes: 0 }) }) },
     }),
   )
@@ -119,12 +139,12 @@ async function fixture(t) {
     res.json({
       user: req.user,
       authAvailable: auth.available,
-      referee: mayReferee(auth, req.user, referees),
+      admin: mayAdmin(auth, req.user),
     }),
   )
   app.get('/private', auth.requireUser, (req, res) => res.json({ owner: req.user.id }))
   const base = await listen(t, app)
-  async function begin({ returnTo = '/', subject = 'alice', claims = {}, key } = {}) {
+  async function begin({ returnTo = '/', subject = 'alice', claims = {}, key, noRefresh = false } = {}) {
     const response = await fetch(`${base}/api/auth/login?${new URLSearchParams({ returnTo })}`, {
       redirect: 'manual',
     })
@@ -140,6 +160,7 @@ async function fixture(t) {
       nonce: url.searchParams.get('nonce'),
       claims: { sub: subject, ...claims },
       key,
+      noRefresh,
     })
     return { cookie: cookie(response, 'pioneer_oidc'), state: url.searchParams.get('state'), code, response }
   }
@@ -158,6 +179,10 @@ async function fixture(t) {
       clock += ms
     },
     exchanges: () => exchanges,
+    refreshes: () => refreshes,
+    setRefresh: (options) => {
+      refreshOptions = options
+    },
   }
 }
 
@@ -172,29 +197,35 @@ test('访客模式需要显式开启，生产环境和部分 OIDC 配置要求�
   assert.throws(() => authConfig({ ...oidcEnv, COOKIE_SAME_SITE: 'strict' }), /SameSite/)
 })
 
-test('管理台按登录用户的 sub 授权', async (t) => {
+test('管理台只接受本客户端的 admin 角色，身份和其他角色不能代替授权', async (t) => {
   const f = await fixture(t)
   const url = `${f.base}/api/admin/operations`
   assert.equal((await fetch(url)).status, 401)
-  for (const [subject, expected] of [
-    ['alice', 200],
-    ['bob', 403],
+  for (const [claims, expected] of [
+    [adminClaims, 200],
+    [{}, 403],
+    [{ realm_access: { roles: ['admin', 'permission-techsvc-admin'] } }, 403],
+    [{ resource_access: { 'other-client': { roles: ['admin'] } } }, 403],
+    [{ resource_access: { 'coding-contract': { roles: 'admin' } } }, 403],
   ]) {
-    const response = await f.callback(await f.begin({ subject, claims: { name: 'alice' } }))
+    const response = await f.callback(await f.begin({ claims: { name: 'alice', ...claims } }))
     const session = cookie(response, 'pioneer_session')
     assert.equal((await fetch(url, { headers: { cookie: session } })).status, expected)
   }
 })
 
-test('裁判端按登录用户的 sub 授权', async (t) => {
+test('裁判台与管理台共用 admin 角色授权', async (t) => {
   const f = await fixture(t)
   const url = `${f.base}/api/referee/operations`
   assert.equal((await fetch(url)).status, 401)
-  for (const [subject, expected] of [
-    ['alice', 200],
-    ['bob', 403],
+  for (const [claims, expected] of [
+    [adminClaims, 200],
+    [{}, 403],
+    [{ resource_access: { 'other-client': { roles: ['admin'] } } }, 403],
   ]) {
-    const response = await f.callback(await f.begin({ subject, claims: { name: subject } }))
+    const response = await f.callback(
+      await f.begin({ subject: 'alice', claims: { name: 'alice', ...claims } }),
+    )
     const session = cookie(response, 'pioneer_session')
     const listed = await fetch(url, { headers: { cookie: session } })
     assert.equal(listed.status, expected)
@@ -202,7 +233,7 @@ test('裁判端按登录用户的 sub 授权', async (t) => {
     const meta = await (
       await fetch(`${f.base}/api/session`, { headers: { cookie: session } })
     ).json()
-    assert.equal(meta.referee, subject === 'alice')
+    assert.equal(meta.admin, expected === 200)
   }
 })
 
@@ -224,7 +255,7 @@ test('真实授权码交换、PKCE、签名校验、个人身份、退出及会�
   )
   assert.deepEqual(
     (await (await fetch(`${f.base}/api/session`, { headers: { cookie: session } })).json()).user,
-    { id: 'alice', name: 'Alice', avatar: null },
+    { id: 'alice', name: 'Alice', avatar: null, isAdmin: false },
   )
   assert.deepEqual(await (await fetch(`${f.base}/private`, { headers: { cookie: session } })).json(), {
     owner: 'alice',
@@ -293,12 +324,97 @@ test('登录返回地址不能跳到外部站点', async (t) => {
   }
 })
 
+test('刷新后重新计算管理员权限，轮换 refresh token，并合并并发刷新', async (t) => {
+  const f = await fixture(t)
+  const session = cookie(await f.callback(await f.begin({ claims: adminClaims })), 'pioneer_session')
+  const headers = { cookie: session }
+  const url = `${f.base}/api/admin/operations`
+  assert.equal((await fetch(url, { headers })).status, 200)
+  f.setRefresh({ claims: { resource_access: {} } })
+  f.advance(5 * 60 * 1000)
+  const responses = await Promise.all(Array.from({ length: 5 }, () => fetch(url, { headers })))
+  assert.deepEqual(
+    responses.map((r) => r.status),
+    [403, 403, 403, 403, 403],
+  )
+  assert.equal(f.refreshes(), 1)
+  const current = await (await fetch(`${f.base}/api/session`, { headers })).json()
+  assert.equal(current.user.isAdmin, false)
+  assert.equal(JSON.stringify(current).includes('refresh-'), false)
+  f.setRefresh({ claims: adminClaims })
+  f.advance(5 * 60 * 1000)
+  assert.equal((await fetch(url, { headers })).status, 200)
+  assert.equal(f.refreshes(), 2)
+})
+
+test('刷新失败、缺少 ID Token、身份变化和无效签名均撤销会话', async (t) => {
+  const f = await fixture(t)
+  for (const options of [
+    { error: true },
+    { omitIdToken: true },
+    { claims: { sub: 'bob' } },
+    { claims: { aud: 'other-client' } },
+    { claims: { iss: 'https://attacker.test' } },
+    { claims: { exp: 1 } },
+    { key: otherKeys.privateKey },
+  ]) {
+    const session = cookie(await f.callback(await f.begin({ claims: adminClaims })), 'pioneer_session')
+    f.setRefresh(options)
+    f.advance(5 * 60 * 1000)
+    const response = await fetch(`${f.base}/api/admin/operations`, { headers: { cookie: session } })
+    assert.equal(response.status, 401)
+    assert.match(cookie(response, 'pioneer_session'), /^pioneer_session=$/)
+    assert.equal((await fetch(`${f.base}/private`, { headers: { cookie: session } })).status, 401)
+  }
+})
+
+test('没有 refresh token 的会话到期后必须重新登录', async (t) => {
+  const f = await fixture(t)
+  const session = cookie(
+    await f.callback(await f.begin({ noRefresh: true, claims: adminClaims })),
+    'pioneer_session',
+  )
+  const headers = { cookie: session }
+  assert.equal((await fetch(`${f.base}/api/admin/operations`, { headers })).status, 200)
+  f.advance(5 * 60 * 1000)
+  assert.equal((await fetch(`${f.base}/api/admin/operations`, { headers })).status, 401)
+})
+
+test('刷新进行时退出，不恢复已注销的会话', async (t) => {
+  const f = await fixture(t)
+  const session = cookie(await f.callback(await f.begin({ claims: adminClaims })), 'pioneer_session')
+  const headers = { cookie: session }
+  let release
+  let started
+  const waiting = new Promise((resolve) => {
+    started = resolve
+  })
+  f.setRefresh({
+    wait: () => {
+      started()
+      return new Promise((resolve) => {
+        release = resolve
+      })
+    },
+  })
+  f.advance(5 * 60 * 1000)
+  const pending = fetch(`${f.base}/api/admin/operations`, { headers })
+  await waiting
+  try {
+    assert.equal((await fetch(`${f.base}/api/auth/logout`, { method: 'POST', headers })).status, 200)
+  } finally {
+    release()
+  }
+  assert.equal((await pending).status, 401)
+  assert.equal((await fetch(`${f.base}/private`, { headers })).status, 401)
+})
+
 test('实际 API 启用 OIDC 后，未登录无法创建、读取作战记录或评测代码', async (t) => {
   const { base } = await startApi(t, oidcEnv)
   assert.deepEqual(await (await fetch(`${base}/api/session`)).json(), {
     user: null,
     authAvailable: true,
-    referee: false,
+    admin: false,
   })
   for (const [path, method] of [
     ['/api/records/best', 'GET'],
